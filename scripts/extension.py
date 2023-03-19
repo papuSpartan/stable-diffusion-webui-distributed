@@ -5,6 +5,8 @@ https://github.com/papuSpartan/stable-diffusion-webui-distributed
 import base64
 import io
 import json
+import re
+
 from modules import scripts, script_callbacks
 from modules import processing
 from threading import Thread
@@ -164,8 +166,10 @@ class Script(scripts.Script):
         # TODO api for some reason returns 200 even if something failed to be set.
         #  for now we may have to make redundant GET requests to check if actually successful...
         #  https://github.com/AUTOMATIC1111/stable-diffusion-webui/issues/8146
+        name = re.sub(r'\s?\[[^\]]*\]$', '', opts.data["sd_model_checkpoint"])
         option_payload = {
-            "sd_model_checkpoint": opts.data["sd_model_checkpoint"],
+            # "sd_model_checkpoint": opts.data["sd_model_checkpoint"],
+            "sd_model_checkpoint": name,
             "sd_vae": opts.data["sd_vae"]
         }
 
