@@ -17,4 +17,10 @@ def preload(parser):
 		help="Enable auto-saving of remote worker generations",
 		action="store_true"
 	)
+
+	parser.add_argument(
+		"--distributed-debug",
+		help="Enable debug information",
+		action="store_true"
+	)
 	# args = parser.parse_args()

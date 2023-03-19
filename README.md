@@ -65,3 +65,4 @@ On each slave instance:
 **--distributed-remotes** Enter n pairs of sockets corresponding to remote workers in the form `name:address:port`\
 **--distributed-skip-verify-remotes** Disable verification of remote worker TLS certificates (useful for if you are using self-signed certs like with auto tls-https)\
 **--distributed-remotes-autosave** Enable auto-saving of remote worker generations
+**--distributed-debug** Enable debug information

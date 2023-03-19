@@ -17,6 +17,8 @@ from inspect import getsourcefile
 from os.path import abspath
 from pathlib import Path
 from modules.processing import process_images
+from webui import server_name
+from modules.shared import cmd_opts
 
 # from modules.processing import StableDiffusionProcessing, StableDiffusionProcessingTxt2Img
 
@@ -114,9 +116,15 @@ class Worker:
         if master is True:
             self.master = master
             self.uuid = 'master'
-            # TODO get real ipm of main instance
             # set to a sentinel value to avoid issues with speed comparisons
             self.avg_ipm = 0
+
+            # right now this is really only for clarity while debugging:
+            self.address = server_name
+            if cmd_opts.port is None:
+                self.port = 7860
+            else:
+                self.port = cmd_opts.port
             return
 
         self.address = address
@@ -236,9 +244,9 @@ class Worker:
                 try:
                     percent_difference = self.other_to_euler_a[payload['sampler_name']]
                     if percent_difference > 0:
-                        eta = eta - (eta * abs((percent_difference / 100)))
+                        eta -= (eta * abs((percent_difference / 100)))
                     else:
-                        eta = eta + (eta * abs((percent_difference / 100)))
+                        eta += (eta * abs((percent_difference / 100)))
                 except KeyError:
                     print(f"Sampler '{payload['sampler_name']}' efficiency is not recorded.\n")
                     print(f"Sampler efficiency will be treated as equivalent to Euler A.")
@@ -247,13 +255,15 @@ class Worker:
             #  That way initial estimations are more accurate from the second sdwui session onward
             # adjust for a known inaccuracy in our estimation of this worker using average percent error
             if len(self.eta_percent_error) > 0:
-                # eta = eta / (1 - self.eta_mpe() / 100)
                 correction = eta * (self.eta_mpe() / 100)
-                print(f"worker '{self.uuid}' with correction +{eta + correction} - {eta - correction}")
+
+                if cmd_opts.distributed_debug:
+                    print(f"worker '{self.uuid}'s ETA was off by {correction}%")
+
                 if correction > 0:
-                    eta = eta + correction
+                    eta += correction
                 else:
-                    eta = eta - correction
+                    eta -= correction
 
             return eta
         except Exception as e:
@@ -314,8 +324,10 @@ class Worker:
             if self.benchmarked:
                 self.response_time = time.time() - start
                 variance = ((eta - self.response_time) / self.response_time) * 100
-                print(f"\nWorker '{self.uuid}' was off by {variance:.2f}%.\n")
-                print(f"Predicted {eta:.2f}s. Actual: {self.response_time:.2f}s\n")
+
+                if cmd_opts.distributed_debug:
+                    print(f"\nWorker '{self.uuid}'s ETA was off by {variance:.2f}%.\n")
+                    print(f"Predicted {eta:.2f}s. Actual: {self.response_time:.2f}s\n")
 
                 if self.eta_percent_error == 0:
                     self.eta_percent_error[0] = variance
@@ -551,9 +563,12 @@ class World:
                 if not benchmark_payload_loaded:
                     benchmark_payload = workers_info[worker.uuid]['benchmark_payload']
                     benchmark_payload_loaded = True
-                    print("loaded saved worker configuration:")
-                    print(workers_info)
+
+                    if cmd_opts.distributed_debug:
+                        print("loaded saved worker configuration:")
+                        print(workers_info)
                 worker.avg_ipm = workers_info[worker.uuid]['avg_ipm']
+                worker.benchmarked = True
 
             workers_info.update(worker.info(benchmark_payload=benchmark_payload))
 
