@@ -725,15 +725,16 @@ class World:
 
         # Now that this worker would (otherwise) not be doing anything, see if it can still do something.
         # Calculate how many images it can output in the time that it takes the slowest real-time worker to do so.
-        slowest_active_worker = self.slowest_realtime_job().worker
-        slack_time = slowest_active_worker.batch_eta(payload=payload)
-        # in the case that this worker is now taking on what others workers would have been (if they were real-time)
-        # this means that there will be more slack time for complementary nodes
-        slack_time = slack_time + ((slack_time / payload['batch_size']) * images_per_job)
 
         for job in self.jobs:
             if job.complementary is False:
                 continue
+
+            slowest_active_worker = self.slowest_realtime_job().worker
+            slack_time = slowest_active_worker.batch_eta(payload=payload)
+            # in the case that this worker is now taking on what others workers would have been (if they were real-time)
+            # this means that there will be more slack time for complementary nodes
+            slack_time = slack_time + ((slack_time / payload['batch_size']) * images_per_job)
 
             # see how long it would take to produce only 1 image on this complementary worker
             fake_payload = copy.copy(payload)
