@@ -19,7 +19,8 @@ import copy
 from modules.images import save_image
 from modules.shared import cmd_opts
 import time
-from scripts.spartan.World import World, Worker, NotBenchmarked, WorldAlreadyInitialized
+from scripts.spartan.World import World, NotBenchmarked, WorldAlreadyInitialized
+from scripts.spartan.Worker import Worker
 from modules.shared import opts
 
 path_root = scripts.basedir()
