@@ -90,6 +90,8 @@ class Worker:
     last_mpe: float = None
     response: requests.Response = None
     loaded_model: str = None
+    loaded_vae: str = None
+    interrupted: bool = False
 
     # Percentages representing (roughly) how much faster a given sampler is in comparison to Euler A.
     # We compare to euler a because that is what we currently benchmark each node with.
@@ -135,6 +137,7 @@ class Worker:
         self.verify_remotes = verify_remotes
         self.response_time = None
         self.loaded_model = None
+        self.loaded_vae = None
 
         if uuid is not None:
             self.uuid = uuid
@@ -262,7 +265,7 @@ class Worker:
                 correction = eta * (self.eta_mpe() / 100)
 
                 if cmd_opts.distributed_debug:
-                   print(f"worker '{self.uuid}'s ETA was off by {correction}%")
+                   print(f"worker '{self.uuid}'s last ETA was off by {correction}%")
 
                 if correction > 0:
                     eta += correction
@@ -325,7 +328,8 @@ class Worker:
             )
             self.response = response.json()
 
-            if self.benchmarked:
+            # update list of ETA accuracy
+            if self.benchmarked and not self.interrupted:
                 self.response_time = time.time() - start
                 variance = ((eta - self.response_time) / self.response_time) * 100
 
@@ -408,6 +412,17 @@ class Worker:
         self.benchmarked = True
         return avg_ipm
 
+    def interrupt(self):
+        response = requests.post(
+            self.full_url('interrupt'),
+            json={},
+            verify=self.verify_remotes
+        )
+
+        if response.status_code == 200:
+            self.interrupted = True
+            if cmd_opts.distributed_debug:
+                print(f"successfully interrupted worker {self.uuid}")
 
 class Job:
     """
@@ -422,6 +437,8 @@ class Job:
         self.worker: Worker = worker
         self.batch_size: int = batch_size
         self.complementary: bool = False
+
+
 
 
 class World:
@@ -539,6 +556,17 @@ class World:
 
         worker = Worker(uuid=uuid, address=address, port=port, verify_remotes=self.verify_remotes)
         self.workers.append(worker)
+
+    def interrupt_remotes(self):
+        threads: List[Thread] = []
+
+        for worker in self.workers:
+            if worker.master:
+                continue
+
+            t = Thread(target=worker.interrupt, args=())
+            t.start()
+
 
     def benchmark(self):
         """

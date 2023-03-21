@@ -7,12 +7,13 @@ import io
 import json
 import re
 
+import gradio
+
 from modules import scripts, script_callbacks
 from modules import processing
 from threading import Thread
 from PIL import Image
 from typing import List
-from modules.processing import StableDiffusionProcessingTxt2Img
 import urllib3
 import copy
 from modules.images import save_image
@@ -52,6 +53,23 @@ class Script(scripts.Script):
     def show(self, is_img2img):
         # return scripts.AlwaysVisible
         return True
+
+    def ui(self, is_img2img):
+
+        with gradio.Box():  # adds padding so our components don't look out of place
+            interrupt_all_btn = gradio.Button(value="Interrupt all remote workers")
+            interrupt_all_btn.style(full_width=False)
+            interrupt_all_btn.click(Script.ui_connect_interrupt_btn, inputs=[], outputs=[])
+
+        return [interrupt_all_btn]
+
+    # World is not constructed until the first generation job, so I use an intermediary call
+    @staticmethod
+    def ui_connect_interrupt_btn():
+        try:
+            Script.world.interrupt_remotes()
+        except AttributeError:
+            print("Nothing to interrupt, Distributed system not initialized")
 
     @staticmethod
     def add_to_gallery(processed, p):
@@ -167,13 +185,14 @@ class Script(scripts.Script):
         #  for now we may have to make redundant GET requests to check if actually successful...
         #  https://github.com/AUTOMATIC1111/stable-diffusion-webui/issues/8146
         name = re.sub(r'\s?\[[^\]]*\]$', '', opts.data["sd_model_checkpoint"])
+        vae = opts.data["sd_vae"]
         option_payload = {
             # "sd_model_checkpoint": opts.data["sd_model_checkpoint"],
             "sd_model_checkpoint": name,
-            "sd_vae": opts.data["sd_vae"]
+            "sd_vae": vae
         }
 
-        sync_model = False  # should only really to sync models once per total job
+        sync = False  # should only really to sync once per job
         Script.world.optimize_jobs(payload)  # optimize work assignment before dispatching
         for job in Script.world.jobs:
             if job.batch_size < 1 or job.worker.master:
@@ -182,12 +201,13 @@ class Script(scripts.Script):
             new_payload = copy.copy(payload)  # prevent race condition instead of sharing the payload object
             new_payload['batch_size'] = job.batch_size
 
-            if job.worker.loaded_model != name:
-                sync_model = True
+            if job.worker.loaded_model != name or job.worker.loaded_vae != vae:
+                sync = True
                 job.worker.loaded_model = name
+                job.worker.loaded_vae = vae
 
             # print(f"requesting {new_payload['batch_size']} images from worker '{job.worker.uuid}'\n")
-            t = Thread(target=job.worker.request, args=(new_payload, option_payload, sync_model,))
+            t = Thread(target=job.worker.request, args=(new_payload, option_payload, sync,))
 
             t.start()
             Script.worker_threads.append(t)
