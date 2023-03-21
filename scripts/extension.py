@@ -173,7 +173,7 @@ class Script(scripts.Script):
             "sd_vae": opts.data["sd_vae"]
         }
 
-        first_option_sync = True  # should only really to sync models once per total job
+        sync_model = False  # should only really to sync models once per total job
         Script.world.optimize_jobs(payload)  # optimize work assignment before dispatching
         for job in Script.world.jobs:
             if job.batch_size < 1 or job.worker.master:
@@ -182,9 +182,12 @@ class Script(scripts.Script):
             new_payload = copy.copy(payload)  # prevent race condition instead of sharing the payload object
             new_payload['batch_size'] = job.batch_size
 
+            if job.worker.loaded_model != name:
+                sync_model = True
+                job.worker.loaded_model = name
+
             # print(f"requesting {new_payload['batch_size']} images from worker '{job.worker.uuid}'\n")
-            t = Thread(target=job.worker.request, args=(new_payload, option_payload, first_option_sync,))
-            first_option_sync = False
+            t = Thread(target=job.worker.request, args=(new_payload, option_payload, sync_model,))
 
             t.start()
             Script.worker_threads.append(t)

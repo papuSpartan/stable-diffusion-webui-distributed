@@ -19,6 +19,8 @@ from pathlib import Path
 from modules.processing import process_images
 from webui import server_name
 from modules.shared import cmd_opts
+# from modules.errors import display
+import gradio as gr
 
 # from modules.processing import StableDiffusionProcessing, StableDiffusionProcessingTxt2Img
 
@@ -87,6 +89,7 @@ class Worker:
     eta_percent_error: List[float] = []
     last_mpe: float = None
     response: requests.Response = None
+    loaded_model: str = None
 
     # Percentages representing (roughly) how much faster a given sampler is in comparison to Euler A.
     # We compare to euler a because that is what we currently benchmark each node with.
@@ -131,6 +134,7 @@ class Worker:
         self.port = port
         self.verify_remotes = verify_remotes
         self.response_time = None
+        self.loaded_model = None
 
         if uuid is not None:
             self.uuid = uuid
@@ -258,7 +262,7 @@ class Worker:
                 correction = eta * (self.eta_mpe() / 100)
 
                 if cmd_opts.distributed_debug:
-                    print(f"worker '{self.uuid}'s ETA was off by {correction}%")
+                   print(f"worker '{self.uuid}'s ETA was off by {correction}%")
 
                 if correction > 0:
                     eta += correction
@@ -379,10 +383,9 @@ class Worker:
                 t.join()
                 elapsed = time.time() - start
                 sample_ipm = ipm(elapsed)
-            # except InvalidWorkerResponse:
-            except Exception as e:
+            except InvalidWorkerResponse as e:
                 print(e)
-                # print(f"Check that worker '{self.uuid}' at {self} is online and port accepting sdwui api requests\n")
+                raise gr.Error(e)
                 continue
 
             if i >= warmup_samples:
