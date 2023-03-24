@@ -6,9 +6,7 @@ import base64
 import io
 import json
 import re
-
 import gradio
-
 from modules import scripts, script_callbacks
 from modules import processing
 from threading import Thread
@@ -22,9 +20,6 @@ import time
 from scripts.spartan.World import World, NotBenchmarked, WorldAlreadyInitialized
 from scripts.spartan.Worker import Worker
 from modules.shared import opts
-
-path_root = scripts.basedir()
-
 
 # TODO implement SSDP advertisement of some sort in sdwui api to allow extension to automatically discover workers?
 # TODO see if the current api has some sort of UUID generation functionality.
