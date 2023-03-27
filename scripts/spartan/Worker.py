@@ -9,6 +9,7 @@ from webui import server_name
 from modules.shared import cmd_opts
 import gradio as gr
 from scripts.spartan.shared import benchmark_payload
+from enum import Enum
 
 
 class InvalidWorkerResponse(Exception):
@@ -16,6 +17,12 @@ class InvalidWorkerResponse(Exception):
     Should be raised when an invalid or unexpected response is received from a worker request.
     """
     pass
+
+
+class State(Enum):
+    IDLE = 1
+    WORKING = 2
+    INTERRUPTED = 3
 
 
 class Worker:
@@ -53,7 +60,7 @@ class Worker:
     response: requests.Response = None
     loaded_model: str = None
     loaded_vae: str = None
-    interrupted: bool = False
+    state: State = None
 
     # Percentages representing (roughly) how much faster a given sampler is in comparison to Euler A.
     # We compare to euler a because that is what we currently benchmark each node with.
@@ -100,6 +107,7 @@ class Worker:
         self.response_time = None
         self.loaded_model = ''
         self.loaded_vae = ''
+        self.state = State.IDLE
 
         if uuid is not None:
             self.uuid = uuid
@@ -251,6 +259,8 @@ class Worker:
 
         # TODO detect remote out of memory exception and restart or garbage collect instance using api?
         try:
+            self.state = State.WORKING
+
             # query memory available on worker and store for future reference
             if self.queried is False:
                 self.queried = True
@@ -290,7 +300,7 @@ class Worker:
                 self.response = response.json()
 
                 # update list of ETA accuracy
-                if self.benchmarked and not self.interrupted:
+                if self.benchmarked and not self.state == State.INTERRUPTED:
                     self.response_time = time.time() - start
                     variance = ((eta - self.response_time) / self.response_time) * 100
 
@@ -312,6 +322,7 @@ class Worker:
         except requests.exceptions.ConnectTimeout:
             print(f"\nTimed out waiting for worker '{self.uuid}' at {self}")
 
+        self.state = State.IDLE
         return
 
     def benchmark(self) -> int:
@@ -342,6 +353,7 @@ class Worker:
         results: List[float] = []
         # it's seems to be lower for the first couple of generations
         # TODO look into how and why this "warmup" happens
+        self.state = State.WORKING
         for i in range(0, samples + warmup_samples):  # run some extra times so that the remote can "warm up"
             t = Thread(target=self.request, args=(benchmark_payload, None, False,))
             try:  # if the worker is unreachable/offline then handle that here
@@ -372,7 +384,21 @@ class Worker:
         # noinspection PyTypeChecker
         self.response = None
         self.benchmarked = True
+        self.state = State.IDLE
         return avg_ipm
+
+    def refresh_checkpoints(self):
+
+        response = requests.post(
+            self.full_url('refresh-checkpoints'),
+            json={},
+            verify=self.verify_remotes
+        )
+
+        if response.status_code == 200:
+            self.state = State.INTERRUPTED
+            if cmd_opts.distributed_debug:
+                print(f"successfully refreshed checkpoints for worker '{self.uuid}'")
 
     def interrupt(self):
         response = requests.post(
@@ -382,6 +408,6 @@ class Worker:
         )
 
         if response.status_code == 200:
-            self.interrupted = True
+            self.state = State.INTERRUPTED
             if cmd_opts.distributed_debug:
                 print(f"successfully interrupted worker {self.uuid}")

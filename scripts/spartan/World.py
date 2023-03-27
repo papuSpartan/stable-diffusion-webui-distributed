@@ -178,6 +178,15 @@ class World:
             t = Thread(target=worker.interrupt, args=())
             t.start()
 
+    def refresh_checkpoints(self):
+        threads: List[Thread] = []
+
+        for worker in self.workers:
+            if worker.master:
+                continue
+
+            t = Thread(target=worker.refresh_checkpoints, args=())
+            t.start()
 
     def benchmark(self):
         """
