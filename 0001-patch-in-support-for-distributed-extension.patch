@@ -1,0 +1,75 @@
+From 418aa069a5ea5260b4fa379b8aaa932759ac3496 Mon Sep 17 00:00:00 2001
+From: papuSpartan <30642826+papuSpartan@users.noreply.github.com>
+Date: Thu, 11 May 2023 19:54:48 -0500
+Subject: [PATCH] patch in support for distributed extension
+
+---
+ modules/script_callbacks.py | 20 ++++++++++++++++++++
+ modules/txt2img.py          |  2 ++
+ 2 files changed, 22 insertions(+)
+
+diff --git a/modules/script_callbacks.py b/modules/script_callbacks.py
+index 3c21a362..c9579613 100644
+--- a/modules/script_callbacks.py
++++ b/modules/script_callbacks.py
+@@ -109,6 +109,7 @@ callback_map = dict(
+     callbacks_infotext_pasted=[],
+     callbacks_script_unloaded=[],
+     callbacks_before_ui=[],
++    callbacks_after_batch_processed = [],
+     callbacks_on_reload=[],
+ )
+ 
+@@ -141,6 +142,19 @@ def model_loaded_callback(sd_model):
+         except Exception:
+             report_exception(c, 'model_loaded_callback')
+ 
++def after_batch_processed_callback(processed, options):
++    for c in callback_map['callbacks_after_batch_processed']:
++        try:
++            return c.callback(processed, options)
++        except Exception:
++            report_exception(c, 'after_batch_processed_callback')
++
++def on_after_batch_processed(callback):
++    """register a function to be called right after a batch is processed"""
++
++    add_callback(callback_map['callbacks_after_batch_processed'], callback)
++
++
+ 
+ def ui_tabs_callback():
+     res = []
+@@ -409,3 +423,9 @@ def on_before_ui(callback):
+     """register a function to be called before the UI is created."""
+ 
+     add_callback(callback_map['callbacks_before_ui'], callback)
++
++
++def on_after_image_processed(callback):
++    """register a function to be called right after a batch is processed"""
++
++    add_callback(callback_map['callbacks_after_image_processed'], callback)
+diff --git a/modules/txt2img.py b/modules/txt2img.py
+index f022381c..c194fe8f 100644
+--- a/modules/txt2img.py
++++ b/modules/txt2img.py
+@@ -4,6 +4,7 @@ from modules.generation_parameters_copypaste import create_override_settings_dic
+ from modules.shared import opts, cmd_opts
+ import modules.shared as shared
+ from modules.ui import plaintext_to_html
++from modules import script_callbacks
+ 
+ 
+ def txt2img(id_task: str, prompt: str, negative_prompt: str, prompt_styles, steps: int, sampler_index: int, restore_faces: bool, tiling: bool, n_iter: int, batch_size: int, cfg_scale: float, seed: int, subseed: int, subseed_strength: float, seed_resize_from_h: int, seed_resize_from_w: int, seed_enable_extras: bool, height: int, width: int, enable_hr: bool, denoising_strength: float, hr_scale: float, hr_upscaler: str, hr_second_pass_steps: int, hr_resize_x: int, hr_resize_y: int, override_settings_texts, *args):
+@@ -52,6 +53,7 @@ def txt2img(id_task: str, prompt: str, negative_prompt: str, prompt_styles, step
+     if processed is None:
+         processed = processing.process_images(p)
+ 
++    script_callbacks.after_batch_processed_callback(processed=processed, options=p)
+     p.close()
+ 
+     shared.total_tqdm.clear()
+-- 
+2.40.0.windows.1
+
