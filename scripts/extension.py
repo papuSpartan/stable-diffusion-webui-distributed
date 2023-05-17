@@ -21,7 +21,7 @@ from pathlib import Path
 import os
 import subprocess
 from scripts.spartan.World import World, NotBenchmarked, WorldAlreadyInitialized
-from scripts.spartan.Worker import Worker
+from scripts.spartan.Worker import Worker, State
 from modules.shared import opts
 
 # TODO implement SSDP advertisement of some sort in sdwui api to allow extension to automatically discover workers?
@@ -60,13 +60,16 @@ class Script(scripts.Script):
 
                 with gradio.Tab('Status') as status_tab:
                     status = gradio.Textbox(elem_id='status', show_label=False)
-                    status_tab.select(fn=Script.ui_connect_test, inputs=[], outputs=[status])
+                    status_tab.select(fn=Script.ui_connect_status, inputs=[], outputs=[status])
+
+                    jobs = gradio.Textbox(elem_id='jobs', label='Jobs', show_label=True)
+                    # status_tab.select(fn=Script.world.__str__, inputs=[], outputs=[jobs, status]),
 
                     refresh_status_btn = gradio.Button(value='Refresh')
                     refresh_status_btn.style(size='sm')
-                    refresh_status_btn.click(Script.ui_connect_test, inputs=[], outputs=[status])
+                    refresh_status_btn.click(Script.ui_connect_status, inputs=[], outputs=[jobs, status])
 
-                with gradio.Tab('Remote Utils'):
+                with gradio.Tab('Utils'):
                     refresh_checkpoints_btn = gradio.Button(value='Refresh checkpoints')
                     refresh_checkpoints_btn.style(full_width=False)
                     refresh_checkpoints_btn.click(Script.ui_connect_refresh_ckpts_btn, inputs=[], outputs=[])
@@ -79,7 +82,18 @@ class Script(scripts.Script):
                     interrupt_all_btn.style(full_width=False)
                     interrupt_all_btn.click(Script.ui_connect_interrupt_btn, inputs=[], outputs=[])
 
+                    # redo benchmarks button
+                    redo_benchmarks_btn = gradio.Button(value='Redo benchmarks')
+                    redo_benchmarks_btn.style(full_width=False)
+                    redo_benchmarks_btn.click(Script.ui_connect_benchmark_button, inputs=[], outputs=[])
+
+
         return
+
+    @staticmethod
+    def ui_connect_benchmark_button():
+        print("Redoing benchmarks...")
+        Script.world.benchmark(rebenchmark=True)
 
     @staticmethod
     def user_sync_script():
@@ -120,23 +134,29 @@ class Script(scripts.Script):
             print("Distributed system not initialized")
 
     @staticmethod
-    def ui_connect_test():
+    def ui_connect_status():
         try:
-            temp = ''
+            worker_status = ''
 
             for worker in Script.world.workers:
                 if worker.master:
                     continue
 
-                temp += f"{worker.uuid} at {worker.address} is {worker.state.name}\n"
+                worker_status += f"{worker.uuid} at {worker.address} is {worker.state.name}\n"
 
-            return temp
+            # TODO replace this with a single check to a state flag that we should make in the world class
+            for worker in Script.world.workers:
+                if worker.state == State.WORKING:
+                    return Script.world.__str__(), worker_status
+
+            return 'No active jobs!', worker_status
 
         # init system if it isn't already
-        except AttributeError:
-            # batch size will be clobbered later once an actual request is made anyway so I just pass 1
+        except AttributeError as e:
+            print(e)
+            # batch size will be clobbered later once an actual request is made anyway
             Script.initialize(initial_payload=None)
-            Script.ui_connect_test()
+            return 'refresh!', 'refresh!'
 
 
     @staticmethod
@@ -222,33 +242,38 @@ class Script(scripts.Script):
 
     @staticmethod
     def initialize(initial_payload):
-        if Script.verify_remotes is False:
-            print(f"WARNING: you have chosen to forego the verification of worker TLS certificates")
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
+        # get default batch size
         try:
             batch_size = initial_payload.batch_size
         except AttributeError:
             batch_size = 1
 
-        Script.world = World(initial_payload=initial_payload, verify_remotes=Script.verify_remotes)
+        if Script.world is None:
+            if Script.verify_remotes is False:
+                print(f"WARNING: you have chosen to forego the verification of worker TLS certificates")
+                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-        # add workers to the world
-        for worker in cmd_opts.distributed_remotes:
-            Script.world.add_worker(uuid=worker[0], address=worker[1], port=worker[2])
+            # construct World
+            Script.world = World(initial_payload=initial_payload, verify_remotes=Script.verify_remotes)
 
-        try:
-            Script.world.initialize(batch_size)
-            print("World initialized!")
-        except WorldAlreadyInitialized:
-            Script.world.update_world(total_batch_size=batch_size)
+            # add workers to the world
+            for worker in cmd_opts.distributed_remotes:
+                Script.world.add_worker(uuid=worker[0], address=worker[1], port=worker[2])
+
+        else:
+            # update world or initialize and update if necessary
+            try:
+                Script.world.initialize(batch_size)
+                print("World initialized!")
+            except WorldAlreadyInitialized:
+                Script.world.update_world(total_batch_size=batch_size)
 
     def run(self, p, *args):
         if cmd_opts.distributed_remotes is None:
             raise RuntimeError("Distributed - No remotes passed. (Try using `--distributed-remotes`?)")
 
         # register gallery callback
-        script_callbacks.on_after_image_processed(Script.add_to_gallery)
+        script_callbacks.on_after_batch_processed(Script.add_to_gallery)
 
         Script.initialize(initial_payload=p)
 

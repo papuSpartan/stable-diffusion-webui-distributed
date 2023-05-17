@@ -51,6 +51,14 @@ class Job:
         self.batch_size: int = batch_size
         self.complementary: bool = False
 
+    def __str__(self):
+        prefix = ''
+        suffix = f"Job: {self.batch_size} images. Owned by '{self.worker.uuid}'. Rate: {self.worker.avg_ipm}ipm"
+        if self.complementary:
+            prefix = "(complementary) "
+
+        return prefix + suffix
+
 
 class World:
     """
@@ -70,7 +78,7 @@ class World:
         self.total_batch_size: int = 0
         self.workers: List[Worker] = [master_worker]
         self.jobs: List[Job] = []
-        self.job_timeout: int = 10  # seconds
+        self.job_timeout: int = 0  # seconds
         self.initialized: bool = False
         self.verify_remotes = verify_remotes
         self.initial_payload = copy.copy(initial_payload)
@@ -188,14 +196,18 @@ class World:
             t = Thread(target=worker.refresh_checkpoints, args=())
             t.start()
 
-    def benchmark(self):
+    def benchmark(self, rebenchmark: bool = False):
         """
         Attempts to benchmark all workers a part of the world.
         """
+        global benchmark_payload
 
         workers_info: dict = {}
         saved: bool = os.path.exists(self.worker_info_path)
         benchmark_payload_loaded: bool = False
+
+        if rebenchmark:
+            saved = False
 
         if saved:
             workers_info = json.load(open(self.worker_info_path, 'r'))
@@ -250,6 +262,14 @@ class World:
             print(f"{i}.    worker '{worker}' - {worker.avg_ipm} ipm")
             i += 1
 
+    def __str__(self):
+        # print status of all jobs
+        jobs_str = ""
+        for job in self.jobs:
+            jobs_str += job.__str__() + "\n"
+
+        return jobs_str
+
     def realtime_jobs(self) -> List[Job]:
         """
         Determines which jobs are considered real-time by checking which jobs are not(complementary).
@@ -262,6 +282,8 @@ class World:
         for job in self.jobs:
             if job.complementary is False:
                 fast_jobs.append(job)
+
+        print(f"fast jobs: {fast_jobs}")
 
         return fast_jobs
 
@@ -292,6 +314,10 @@ class World:
         """
 
         fastest_worker = self.fastest_realtime_job().worker
+        # if the worker is the fastest, then there is no lag
+        if worker == fastest_worker:
+            return 0
+
         lag = worker.batch_eta(payload=payload) - fastest_worker.batch_eta(payload=payload)
 
         return lag
@@ -304,6 +330,7 @@ class World:
         Returns:
             float: Local worker speed in ipm
         """
+        global benchmark_payload
 
         master_bench_payload = copy.copy(self.initial_payload)
 
@@ -357,14 +384,14 @@ class World:
 
         deferred_images = 0  # the number of images that were not assigned to a worker due to the worker being too slow
         # the maximum amount of images that a "slow" worker can produce in the slack space where other nodes are working
-        max_compensation = 4
+        # max_compensation = 4 currently unused
         images_per_job = None
 
         for job in self.jobs:
 
             lag = self.job_stall(job.worker, payload=payload)
 
-            if lag < self.job_timeout:
+            if lag < self.job_timeout or lag == 0:
                 job.batch_size = payload['batch_size']
                 continue
 
@@ -396,6 +423,9 @@ class World:
 
             slowest_active_worker = self.slowest_realtime_job().worker
             slack_time = slowest_active_worker.batch_eta(payload=payload)
+            if cmd_opts.distributed_debug:
+                print(f"There's {slack_time:.2f}s of slack time available for worker '{job.worker.uuid}'")
+
             # in the case that this worker is now taking on what others workers would have been (if they were real-time)
             # this means that there will be more slack time for complementary nodes
             slack_time = slack_time + ((slack_time / payload['batch_size']) * images_per_job)
@@ -412,6 +442,8 @@ class World:
         #  It might be better to just inject a black image. (if master is that slow)
         master_job = self.master_job()
         if master_job.batch_size < 1:
+            if cmd_opts.distributed_debug:
+                print("Master couldn't keep up... defaulting to 1 image")
             master_job.batch_size = 1
 
         print("After job optimization, job layout is the following:")

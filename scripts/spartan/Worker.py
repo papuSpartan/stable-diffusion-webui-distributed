@@ -121,7 +121,7 @@ class Worker:
          These things are used to draw certain conclusions after the first session.
 
          Args:
-             benchmark_payload (dict): The payload used the benchmark.
+             benchmark_payload (dict): The payload used in the benchmark.
 
          Returns:
              dict: Worker info, including how it was benchmarked.
@@ -137,9 +137,18 @@ class Worker:
         d[self.uuid] = data
         return d
 
+    def treat_mpe(self):
+        """
+        In collecting percent errors to calculate the MPE, there may be influential outliers that skew the results.
+        Here we cull those outliers from them in order to get a more accurate end result.
+        """
+
+        # TODO implement this
+        pass
+
     def eta_mpe(self):
         """
-        Returns the mean absolute percent error using all the currently stored eta percent errors.
+        Returns the mean percent error using all the currently stored eta percent errors.
 
         Returns:
             mpe (float): The mean percent error of a worker's calculation estimates.
@@ -165,7 +174,7 @@ class Worker:
         """
 
         # TODO check if using http or https
-        return f"https://{self.__str__()}/sdapi/v1/{route}"
+        return f"http://{self.__str__()}/sdapi/v1/{route}"
 
     def batch_eta_hr(self, payload: dict) -> float:
         """
@@ -233,13 +242,21 @@ class Worker:
             if len(self.eta_percent_error) > 0:
                 correction = eta * (self.eta_mpe() / 100)
 
-                if cmd_opts.distributed_debug:
-                    print(f"worker '{self.uuid}'s last ETA was off by {correction}%")
+                # if abs(correction) > 300:
+                #     print(f"correction {abs(correction)} exceeds 300%... .")
 
+                if cmd_opts.distributed_debug:
+                    print(f"worker '{self.uuid}'s last ETA was off by {correction:.2f}%")
+                    print(f"{self.uuid} eta before correction: ", eta)
+
+                # do regression
                 if correction > 0:
-                    eta += correction
-                else:
                     eta -= correction
+                else:
+                    eta += correction
+
+                if cmd_opts.distributed_debug:
+                    print(f"{self.uuid} eta after correction: ", eta)
 
             return eta
         except Exception as e:
@@ -308,10 +325,18 @@ class Worker:
                         print(f"\nWorker '{self.uuid}'s ETA was off by {variance:.2f}%.\n")
                         print(f"Predicted {eta:.2f}s. Actual: {self.response_time:.2f}s\n")
 
-                    if self.eta_percent_error == 0:
-                        self.eta_percent_error[0] = variance
+                    # if the variance is greater than 500% then we ignore it to prevent variation inflation
+                    if abs(variance) < 500:
+                        # check if there are already 5 samples and if so, remove the oldest
+                        # this should help adjust to the user changing tasks
+                        if len(self.eta_percent_error) > 4:
+                            self.eta_percent_error.pop(0)
+                        if self.eta_percent_error == 0:  # init
+                            self.eta_percent_error[0] = variance
+                        else:  # normal case
+                            self.eta_percent_error.append(variance)
                     else:
-                        self.eta_percent_error.append(variance)
+                        print(f"Variance of {variance:.2f}% exceeds threshold of 500%. Ignoring...\n")
 
             except Exception as e:
                 if payload['batch_size'] == 0:
