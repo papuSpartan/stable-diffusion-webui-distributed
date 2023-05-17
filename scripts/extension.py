@@ -60,14 +60,13 @@ class Script(scripts.Script):
 
                 with gradio.Tab('Status') as status_tab:
                     status = gradio.Textbox(elem_id='status', show_label=False)
-                    status_tab.select(fn=Script.ui_connect_status, inputs=[], outputs=[status])
-
                     jobs = gradio.Textbox(elem_id='jobs', label='Jobs', show_label=True)
-                    # status_tab.select(fn=Script.world.__str__, inputs=[], outputs=[jobs, status]),
 
                     refresh_status_btn = gradio.Button(value='Refresh')
                     refresh_status_btn.style(size='sm')
                     refresh_status_btn.click(Script.ui_connect_status, inputs=[], outputs=[jobs, status])
+
+                    status_tab.select(fn=Script.ui_connect_status, inputs=[], outputs=[jobs, status])
 
                 with gradio.Tab('Utils'):
                     refresh_checkpoints_btn = gradio.Button(value='Refresh checkpoints')
