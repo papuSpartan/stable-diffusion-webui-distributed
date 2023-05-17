@@ -78,7 +78,7 @@ class World:
         self.total_batch_size: int = 0
         self.workers: List[Worker] = [master_worker]
         self.jobs: List[Job] = []
-        self.job_timeout: int = 0  # seconds
+        self.job_timeout: int = 6  # seconds
         self.initialized: bool = False
         self.verify_remotes = verify_remotes
         self.initial_payload = copy.copy(initial_payload)
@@ -282,8 +282,6 @@ class World:
         for job in self.jobs:
             if job.complementary is False:
                 fast_jobs.append(job)
-
-        print(f"fast jobs: {fast_jobs}")
 
         return fast_jobs
 

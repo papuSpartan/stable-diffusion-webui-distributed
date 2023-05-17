@@ -137,15 +137,6 @@ class Worker:
         d[self.uuid] = data
         return d
 
-    def treat_mpe(self):
-        """
-        In collecting percent errors to calculate the MPE, there may be influential outliers that skew the results.
-        Here we cull those outliers from them in order to get a more accurate end result.
-        """
-
-        # TODO implement this
-        pass
-
     def eta_mpe(self):
         """
         Returns the mean percent error using all the currently stored eta percent errors.
@@ -241,9 +232,6 @@ class Worker:
             # adjust for a known inaccuracy in our estimation of this worker using average percent error
             if len(self.eta_percent_error) > 0:
                 correction = eta * (self.eta_mpe() / 100)
-
-                # if abs(correction) > 300:
-                #     print(f"correction {abs(correction)} exceeds 300%... .")
 
                 if cmd_opts.distributed_debug:
                     print(f"worker '{self.uuid}'s last ETA was off by {correction:.2f}%")
