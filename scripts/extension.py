@@ -23,6 +23,7 @@ import subprocess
 from scripts.spartan.World import World, NotBenchmarked, WorldAlreadyInitialized
 from scripts.spartan.Worker import Worker, State
 from modules.shared import opts
+from scripts.spartan.shared import logger
 
 # TODO implement SSDP advertisement of some sort in sdwui api to allow extension to automatically discover workers?
 # TODO see if the current api has some sort of UUID generation functionality.
@@ -66,7 +67,7 @@ class Script(scripts.Script):
                     refresh_status_btn.style(size='sm')
                     refresh_status_btn.click(Script.ui_connect_status, inputs=[], outputs=[jobs, status])
 
-                    status_tab.select(fn=Script.ui_connect_status, inputs=[], outputs=[jobs, status])
+                    # status_tab.select(fn=Script.ui_connect_status, inputs=[], outputs=[jobs, status])
 
                 with gradio.Tab('Utils'):
                     refresh_checkpoints_btn = gradio.Button(value='Refresh checkpoints')
@@ -92,7 +93,7 @@ class Script(scripts.Script):
 
     @staticmethod
     def ui_connect_benchmark_button():
-        print("Redoing benchmarks...")
+        logger.info("Redoing benchmarks...")
         Script.world.benchmark(rebenchmark=True)
 
     @staticmethod
@@ -124,14 +125,14 @@ class Script(scripts.Script):
         try:
             Script.world.interrupt_remotes()
         except AttributeError:
-            print("Nothing to interrupt, Distributed system not initialized")
+            logger.debug("Nothing to interrupt, Distributed system not initialized")
 
     @staticmethod
     def ui_connect_refresh_ckpts_btn():
         try:
             Script.world.refresh_checkpoints()
         except AttributeError:
-            print("Distributed system not initialized")
+            logger.debug("Distributed system not initialized")
 
     @staticmethod
     def ui_connect_status():
@@ -153,7 +154,6 @@ class Script(scripts.Script):
 
         # init system if it isn't already
         except AttributeError as e:
-            print(e)
             # batch size will be clobbered later once an actual request is made anyway
             Script.initialize(initial_payload=None)
             return 'refresh!', 'refresh!'
@@ -165,7 +165,7 @@ class Script(scripts.Script):
 
         # get master ipm by estimating based on worker speed
         master_elapsed = time.time() - Script.master_start
-        print(f"Took master {master_elapsed}s")
+        logger.debug(f"Took master {master_elapsed}s")
 
         # wait for response from all workers
         for thread in Script.worker_threads:
@@ -177,7 +177,7 @@ class Script(scripts.Script):
                 images: json = worker.response["images"]
             except TypeError:
                 if worker.master is False:
-                    print(f"Worker '{worker.uuid}' had nothing")
+                    logger.debug(f"Worker '{worker.uuid}' had nothing")
                 continue
 
             image_params: json = worker.response["parameters"]
@@ -250,7 +250,7 @@ class Script(scripts.Script):
 
         if Script.world is None:
             if Script.verify_remotes is False:
-                print(f"WARNING: you have chosen to forego the verification of worker TLS certificates")
+                logger.info(f"WARNING: you have chosen to forego the verification of worker TLS certificates")
                 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
             # construct World
@@ -264,7 +264,7 @@ class Script(scripts.Script):
             # update world or initialize and update if necessary
             try:
                 Script.world.initialize(batch_size)
-                print("World initialized!")
+                logger.debug(f"World initialized!")
             except WorldAlreadyInitialized:
                 Script.world.update_world(total_batch_size=batch_size)
 
@@ -282,8 +282,6 @@ class Script(scripts.Script):
         payload = p.__dict__
         payload['batch_size'] = Script.world.get_default_worker_batch_size()
         payload['scripts'] = None
-        # print(payload)
-        # print(opts.dumpjson())
 
         # TODO api for some reason returns 200 even if something failed to be set.
         #  for now we may have to make redundant GET requests to check if actually successful...
@@ -310,7 +308,6 @@ class Script(scripts.Script):
                 job.worker.loaded_model = name
                 job.worker.loaded_vae = vae
 
-            # print(f"requesting {new_payload['batch_size']} images from worker '{job.worker.uuid}'\n")
             t = Thread(target=job.worker.request, args=(new_payload, option_payload, sync,))
 
             t.start()

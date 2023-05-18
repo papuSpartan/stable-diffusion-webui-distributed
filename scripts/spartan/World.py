@@ -15,9 +15,9 @@ from inspect import getsourcefile
 from os.path import abspath
 from pathlib import Path
 from modules.processing import process_images
-from modules.shared import cmd_opts
+# from modules.shared import cmd_opts
 from scripts.spartan.Worker import Worker
-from scripts.spartan.shared import benchmark_payload
+from scripts.spartan.shared import benchmark_payload, logger
 # from modules.errors import display
 import gradio as gr
 
@@ -95,8 +95,7 @@ class World:
         world_size = self.get_world_size()
         if total_batch_size < world_size:
             self.total_batch_size = world_size
-            print(f"Total batch size should not be less than the number of workers.\n")
-            print(f"Defaulting to a total batch size of '{world_size}' in order to accommodate all workers")
+            logger.debug(f"Defaulting to a total batch size of '{world_size}' in order to accommodate all workers")
         else:
             self.total_batch_size = total_batch_size
 
@@ -202,6 +201,8 @@ class World:
         """
         global benchmark_payload
 
+        logger.info("Benchmarking workers...")
+
         workers_info: dict = {}
         saved: bool = os.path.exists(self.worker_info_path)
         benchmark_payload_loaded: bool = False
@@ -226,9 +227,7 @@ class World:
                     benchmark_payload = workers_info[worker.uuid]['benchmark_payload']
                     benchmark_payload_loaded = True
 
-                    if cmd_opts.distributed_debug:
-                        print("loaded saved worker configuration:")
-                        print(workers_info)
+                    logger.debug(f"loaded saved worker configuration: \n{workers_info}")
                 worker.avg_ipm = workers_info[worker.uuid]['avg_ipm']
                 worker.benchmarked = True
 
@@ -352,7 +351,7 @@ class World:
 
         ipm = benchmark_payload['batch_size'] / (elapsed / 60)
 
-        print(f"Master benchmark took {elapsed}: {ipm} ipm")
+        logger.debug(f"Master benchmark took {elapsed}: {ipm} ipm")
         self.master().benchmarked = True
         return ipm
 
@@ -393,7 +392,7 @@ class World:
                 job.batch_size = payload['batch_size']
                 continue
 
-            print(f"worker '{job.worker.uuid}' would stall the image gallery by ~{lag:.2f}s\n")
+            logger.debug(f"worker '{job.worker.uuid}' would stall the image gallery by ~{lag:.2f}s\n")
             job.complementary = True
             deferred_images = deferred_images + payload['batch_size']
             job.batch_size = 0
@@ -421,8 +420,7 @@ class World:
 
             slowest_active_worker = self.slowest_realtime_job().worker
             slack_time = slowest_active_worker.batch_eta(payload=payload)
-            if cmd_opts.distributed_debug:
-                print(f"There's {slack_time:.2f}s of slack time available for worker '{job.worker.uuid}'")
+            logger.debug(f"There's {slack_time:.2f}s of slack time available for worker '{job.worker.uuid}'")
 
             # in the case that this worker is now taking on what others workers would have been (if they were real-time)
             # this means that there will be more slack time for complementary nodes
@@ -440,11 +438,10 @@ class World:
         #  It might be better to just inject a black image. (if master is that slow)
         master_job = self.master_job()
         if master_job.batch_size < 1:
-            if cmd_opts.distributed_debug:
-                print("Master couldn't keep up... defaulting to 1 image")
+            logger.debug("Master couldn't keep up... defaulting to 1 image")
             master_job.batch_size = 1
 
-        print("After job optimization, job layout is the following:")
+        logger.info("After job optimization, job layout is the following:")
         for job in self.jobs:
-            print(f"worker '{job.worker.uuid}' - {job.batch_size} images")
+            logger.info(f"worker '{job.worker.uuid}' - {job.batch_size} images")
         print()

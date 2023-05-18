@@ -8,7 +8,7 @@ from threading import Thread
 from webui import server_name
 from modules.shared import cmd_opts
 import gradio as gr
-from scripts.spartan.shared import benchmark_payload
+from scripts.spartan.shared import benchmark_payload, logger
 from enum import Enum
 
 
@@ -224,8 +224,8 @@ class Worker:
                     else:
                         eta += (eta * abs((percent_difference / 100)))
                 except KeyError:
-                    print(f"Sampler '{payload['sampler_name']}' efficiency is not recorded.\n")
-                    print(f"Sampler efficiency will be treated as equivalent to Euler A.")
+                    logger.debug(f"Sampler '{payload['sampler_name']}' efficiency is not recorded.\n")
+                    logger.debug(f"Sampler efficiency will be treated as equivalent to Euler A.")
 
             # TODO save and load each workers MPE before the end of session to workers.json.
             #  That way initial estimations are more accurate from the second sdwui session onward
@@ -233,9 +233,8 @@ class Worker:
             if len(self.eta_percent_error) > 0:
                 correction = eta * (self.eta_mpe() / 100)
 
-                if cmd_opts.distributed_debug:
-                    print(f"worker '{self.uuid}'s last ETA was off by {correction:.2f}%")
-                    print(f"{self.uuid} eta before correction: ", eta)
+                logger.debug(f"worker '{self.uuid}'s last ETA was off by {correction:.2f}%")
+                logger.debug(f"{self.uuid} eta before correction: ", eta)
 
                 # do regression
                 if correction > 0:
@@ -243,8 +242,7 @@ class Worker:
                 else:
                     eta += correction
 
-                if cmd_opts.distributed_debug:
-                    print(f"{self.uuid} eta after correction: ", eta)
+                logger.debug(f"{self.uuid} eta after correction: ", eta)
 
             return eta
         except Exception as e:
@@ -277,7 +275,7 @@ class Worker:
 
                 free_vram = int(memory_response['free']) / (1024 * 1024 * 1024)
                 total_vram = int(memory_response['total']) / (1024 * 1024 * 1024)
-                print(f"Worker '{self.uuid}' {free_vram:.2f}/{total_vram:.2f} GB VRAM free\n")
+                logger.debug(f"Worker '{self.uuid}' {free_vram:.2f}/{total_vram:.2f} GB VRAM free\n")
                 self.free_vram = bytes(memory_response['free'])
 
             if sync_options is True:
@@ -292,10 +290,29 @@ class Worker:
 
             if self.benchmarked:
                 eta = self.batch_eta(payload=payload)
-                print(f"worker '{self.uuid}' predicts it will take {eta:.3f}s to generate {payload['batch_size']} image("
+                logger.info(f"worker '{self.uuid}' predicts it will take {eta:.3f}s to generate {payload['batch_size']} image("
                       f"s) at a speed of {self.avg_ipm} ipm\n")
 
             try:
+                # import json
+                # def find_bad_keys(json_data):
+                #     parsed_data = json.loads(json_data)
+                #     bad_keys = []
+
+                #     for key, value in parsed_data.items():
+                #         if isinstance(value, float):
+                #             if value < -1e308 or value > 1e308:
+                #                 bad_keys.append(key)
+
+                #     return bad_keys
+
+                # for key in find_bad_keys(json.dumps(payload)):
+                #     logger.info(f"Bad key '{key}' found in payload with value '{payload[key]}'")
+
+                # s_tmax can be float('inf') which is not serializable so we convert it to the max float value
+                if payload['s_tmax'] == float('inf'):
+                    payload['s_tmax'] = 1e308
+
                 start = time.time()
                 response = requests.post(
                     self.full_url("txt2img"),
@@ -309,9 +326,8 @@ class Worker:
                     self.response_time = time.time() - start
                     variance = ((eta - self.response_time) / self.response_time) * 100
 
-                    if cmd_opts.distributed_debug:
-                        print(f"\nWorker '{self.uuid}'s ETA was off by {variance:.2f}%.\n")
-                        print(f"Predicted {eta:.2f}s. Actual: {self.response_time:.2f}s\n")
+                    logger.debug(f"\nWorker '{self.uuid}'s ETA was off by {variance:.2f}%.\n")
+                    logger.debug(f"Predicted {eta:.2f}s. Actual: {self.response_time:.2f}s\n")
 
                     # if the variance is greater than 500% then we ignore it to prevent variation inflation
                     if abs(variance) < 500:
@@ -324,7 +340,7 @@ class Worker:
                         else:  # normal case
                             self.eta_percent_error.append(variance)
                     else:
-                        print(f"Variance of {variance:.2f}% exceeds threshold of 500%. Ignoring...\n")
+                        logger.debug(f"Variance of {variance:.2f}% exceeds threshold of 500%. Ignoring...\n")
 
             except Exception as e:
                 if payload['batch_size'] == 0:
@@ -333,7 +349,7 @@ class Worker:
                     raise InvalidWorkerResponse(e)
 
         except requests.exceptions.ConnectTimeout:
-            print(f"\nTimed out waiting for worker '{self.uuid}' at {self}")
+            logger.info(f"\nTimed out waiting for worker '{self.uuid}' at {self}")
 
         self.state = State.IDLE
         return
@@ -348,7 +364,7 @@ class Worker:
         samples = 2  # number of times to benchmark the remote / accuracy
         warmup_samples = 2  # number of samples to do before recording as a valid sample in order to "warm-up"
 
-        print(f"Benchmarking worker '{self.uuid}':\n")
+        logger.info(f"Benchmarking worker '{self.uuid}':\n")
 
         def ipm(seconds: float) -> float:
             """
@@ -376,15 +392,16 @@ class Worker:
                 elapsed = time.time() - start
                 sample_ipm = ipm(elapsed)
             except InvalidWorkerResponse as e:
+                # TODO
                 print(e)
                 raise gr.Error(e.__str__())
 
             if i >= warmup_samples:
-                print(f"Sample {i - warmup_samples + 1}: Worker '{self.uuid}'({self}) - {sample_ipm:.2f} image(s) per "
+                logger.info(f"Sample {i - warmup_samples + 1}: Worker '{self.uuid}'({self}) - {sample_ipm:.2f} image(s) per "
                       f"minute\n")
                 results.append(sample_ipm)
             elif i == warmup_samples - 1:
-                print(f"{self.uuid} warming up\n")
+                logger.info(f"{self.uuid} warming up\n")
 
         # average the sample results for accuracy
         ipm_sum = 0
@@ -392,7 +409,7 @@ class Worker:
             ipm_sum += ipm
         avg_ipm = math.floor(ipm_sum / samples)
 
-        print(f"Worker '{self.uuid}' average ipm: {avg_ipm}")
+        logger.info(f"Worker '{self.uuid}' average ipm: {avg_ipm}")
         self.avg_ipm = avg_ipm
         # noinspection PyTypeChecker
         self.response = None
@@ -410,8 +427,7 @@ class Worker:
 
         if response.status_code == 200:
             self.state = State.INTERRUPTED
-            if cmd_opts.distributed_debug:
-                print(f"successfully refreshed checkpoints for worker '{self.uuid}'")
+            logger.debug(f"successfully refreshed checkpoints for worker '{self.uuid}'")
 
     def interrupt(self):
         response = requests.post(
@@ -422,5 +438,4 @@ class Worker:
 
         if response.status_code == 200:
             self.state = State.INTERRUPTED
-            if cmd_opts.distributed_debug:
-                print(f"successfully interrupted worker {self.uuid}")
+            logger.debug(f"successfully interrupted worker {self.uuid}")
