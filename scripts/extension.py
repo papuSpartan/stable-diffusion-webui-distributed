@@ -260,13 +260,11 @@ class Script(scripts.Script):
             for worker in cmd_opts.distributed_remotes:
                 Script.world.add_worker(uuid=worker[0], address=worker[1], port=worker[2])
 
-        else:
-            # update world or initialize and update if necessary
-            try:
-                Script.world.initialize(batch_size)
-                logger.debug(f"World initialized!")
-            except WorldAlreadyInitialized:
-                Script.world.update_world(total_batch_size=batch_size)
+        try:
+            Script.world.initialize(batch_size)
+            logger.debug(f"World initialized!")
+        except WorldAlreadyInitialized:
+            Script.world.update_world(total_batch_size=batch_size)
 
     def run(self, p, *args):
         if cmd_opts.distributed_remotes is None:
