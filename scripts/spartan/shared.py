@@ -3,8 +3,9 @@ from rich.logging import RichHandler
 from modules.shared import cmd_opts
 
 log_level = 'DEBUG' if cmd_opts.distributed_debug else 'INFO'
-logging.basicConfig(level=log_level, format="%(message)s", datefmt="[%X]", handlers=[RichHandler()])
 logger = logging.getLogger("rich")
+logger.addHandler(RichHandler(rich_tracebacks=True, markup=True))
+logger.setLevel(log_level)
 
 benchmark_payload: dict = {
     "prompt": "A herd of cows grazing at the bottom of a sunny valley",
