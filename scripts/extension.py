@@ -177,7 +177,7 @@ class Script(scripts.Script):
                 images: json = worker.response["images"]
             except TypeError:
                 if worker.master is False:
-                    logger.debug(f"Worker '{worker.uuid}' had nothing")
+                    logger.warn(f"Worker '{worker.uuid}' had nothing")
                 continue
 
             image_params: json = worker.response["parameters"]
@@ -250,7 +250,7 @@ class Script(scripts.Script):
 
         if Script.world is None:
             if Script.verify_remotes is False:
-                logger.info(f"WARNING: you have chosen to forego the verification of worker TLS certificates")
+                logger.warn(f"You have chosen to forego the verification of worker TLS certificates")
                 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
             # construct World

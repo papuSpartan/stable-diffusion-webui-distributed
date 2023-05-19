@@ -201,8 +201,6 @@ class World:
         """
         global benchmark_payload
 
-        logger.info("Benchmarking workers...")
-
         workers_info: dict = {}
         saved: bool = os.path.exists(self.worker_info_path)
         benchmark_payload_loaded: bool = False
@@ -438,10 +436,10 @@ class World:
         #  It might be better to just inject a black image. (if master is that slow)
         master_job = self.master_job()
         if master_job.batch_size < 1:
-            logger.debug("Master couldn't keep up... defaulting to 1 image")
+            logger.warn("Master couldn't keep up... defaulting to 1 image")
             master_job.batch_size = 1
 
-        logger.info("After job optimization, job layout is the following:")
+        logger.info("Job distribution:")
         for job in self.jobs:
             logger.info(f"worker '{job.worker.uuid}' - {job.batch_size} images")
         print()

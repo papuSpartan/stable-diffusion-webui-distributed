@@ -10,6 +10,7 @@ from modules.shared import cmd_opts
 import gradio as gr
 from scripts.spartan.shared import benchmark_payload, logger
 from enum import Enum
+import json
 
 
 class InvalidWorkerResponse(Exception):
@@ -224,8 +225,8 @@ class Worker:
                     else:
                         eta += (eta * abs((percent_difference / 100)))
                 except KeyError:
-                    logger.debug(f"Sampler '{payload['sampler_name']}' efficiency is not recorded.\n")
-                    logger.debug(f"Sampler efficiency will be treated as equivalent to Euler A.")
+                    logger.warn(f"Sampler '{payload['sampler_name']}' efficiency is not recorded.\n")
+                    logger.warn(f"Sampler efficiency will be treated as equivalent to Euler A.")
 
             # TODO save and load each workers MPE before the end of session to workers.json.
             #  That way initial estimations are more accurate from the second sdwui session onward
@@ -234,15 +235,15 @@ class Worker:
                 correction = eta * (self.eta_mpe() / 100)
 
                 logger.debug(f"worker '{self.uuid}'s last ETA was off by {correction:.2f}%")
-                logger.debug(f"{self.uuid} eta before correction: ", eta)
-
+                correction_summary = f"correcting '{self.uuid}'s ETA: {eta:.2f}s -> "
                 # do regression
                 if correction > 0:
                     eta -= correction
                 else:
                     eta += correction
 
-                logger.debug(f"{self.uuid} eta after correction: ", eta)
+                correction_summary += f"{eta:.2f}s"
+                logger.debug(correction_summary)
 
             return eta
         except Exception as e:
@@ -294,24 +295,18 @@ class Worker:
                       f"s) at a speed of {self.avg_ipm} ipm\n")
 
             try:
-                # import json
-                # def find_bad_keys(json_data):
-                #     parsed_data = json.loads(json_data)
-                #     bad_keys = []
+                # s_tmax can be float('inf') which is not serializable, so we convert it to the max float value
+                # if payload['s_tmax'] == float('inf'):
+                #     payload['s_tmax'] = 1e308
 
-                #     for key, value in parsed_data.items():
-                #         if isinstance(value, float):
-                #             if value < -1e308 or value > 1e308:
-                #                 bad_keys.append(key)
-
-                #     return bad_keys
-
-                # for key in find_bad_keys(json.dumps(payload)):
-                #     logger.info(f"Bad key '{key}' found in payload with value '{payload[key]}'")
-
-                # s_tmax can be float('inf') which is not serializable so we convert it to the max float value
-                if payload['s_tmax'] == float('inf'):
-                    payload['s_tmax'] = 1e308
+                # try to serialize JSON
+                try:
+                    _value = json.dumps(payload)
+                except Exception as e:
+                    logger.error(f"Could not serialize payload to JSON for worker '{self.uuid}'... Payload: \n{payload}")
+                    logger.error(e)
+                    self.state = State.IDLE
+                    return
 
                 start = time.time()
                 response = requests.post(
@@ -340,7 +335,7 @@ class Worker:
                         else:  # normal case
                             self.eta_percent_error.append(variance)
                     else:
-                        logger.debug(f"Variance of {variance:.2f}% exceeds threshold of 500%. Ignoring...\n")
+                        logger.warn(f"Variance of {variance:.2f}% exceeds threshold of 500%. Ignoring...\n")
 
             except Exception as e:
                 if payload['batch_size'] == 0:
@@ -349,7 +344,7 @@ class Worker:
                     raise InvalidWorkerResponse(e)
 
         except requests.exceptions.ConnectTimeout:
-            logger.info(f"\nTimed out waiting for worker '{self.uuid}' at {self}")
+            logger.error(f"\nTimed out waiting for worker '{self.uuid}' at {self}")
 
         self.state = State.IDLE
         return
