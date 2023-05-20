@@ -67,7 +67,7 @@ class Script(scripts.Script):
                     refresh_status_btn.style(size='sm')
                     refresh_status_btn.click(Script.ui_connect_status, inputs=[], outputs=[jobs, status])
 
-                    # status_tab.select(fn=Script.ui_connect_status, inputs=[], outputs=[jobs, status])
+                    status_tab.select(fn=Script.ui_connect_status, inputs=[], outputs=[jobs, status])
 
                 with gradio.Tab('Utils'):
                     refresh_checkpoints_btn = gradio.Button(value='Refresh checkpoints')
