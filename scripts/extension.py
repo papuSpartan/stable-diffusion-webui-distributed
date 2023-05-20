@@ -61,7 +61,9 @@ class Script(scripts.Script):
 
                 with gradio.Tab('Status') as status_tab:
                     status = gradio.Textbox(elem_id='status', show_label=False)
+                    status.placeholder = 'Refresh!'
                     jobs = gradio.Textbox(elem_id='jobs', label='Jobs', show_label=True)
+                    jobs.placeholder = 'Refresh!'
 
                     refresh_status_btn = gradio.Button(value='Refresh')
                     refresh_status_btn.style(size='sm')
@@ -155,7 +157,7 @@ class Script(scripts.Script):
         except AttributeError as e:
             # batch size will be clobbered later once an actual request is made anyway
             Script.initialize(initial_payload=None)
-            return 'refresh!', 'refresh!'
+            return Script.ui_connect_status()
 
 
     @staticmethod
