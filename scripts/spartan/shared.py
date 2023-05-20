@@ -7,6 +7,7 @@ logger = logging.getLogger("rich")
 logger.addHandler(RichHandler(rich_tracebacks=True, markup=True))
 logger.setLevel(log_level)
 
+warmup_samples = 2  # number of samples to do before recording a valid benchmark sample
 benchmark_payload: dict = {
     "prompt": "A herd of cows grazing at the bottom of a sunny valley",
     "negative_prompt": "",

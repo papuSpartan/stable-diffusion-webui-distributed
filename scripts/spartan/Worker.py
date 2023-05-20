@@ -8,7 +8,7 @@ from threading import Thread
 from webui import server_name
 from modules.shared import cmd_opts
 import gradio as gr
-from scripts.spartan.shared import benchmark_payload, logger
+from scripts.spartan.shared import benchmark_payload, logger, warmup_samples
 from enum import Enum
 import json
 
@@ -208,16 +208,18 @@ class Worker:
             eta = eta * real_steps_to_benched
 
             # show effect of high-res fix
-            if payload['enable_hr'] is True:
+            hr = payload.get('enable_hr', False)
+            if hr:
                 eta += self.batch_eta_hr(payload=payload)
 
             # show effect of image size
             real_pix_to_benched = (payload['width'] * payload['height'])\
                 / (benchmark_payload['width'] * benchmark_payload['height'])
-
             eta = eta * real_pix_to_benched
+
             # show effect of using a sampler other than euler a
-            if payload['sampler_name'] != 'Euler a':
+            sampler = payload.get('sampler_name', 'Euler a')
+            if sampler != 'Euler a':
                 try:
                     percent_difference = self.other_to_euler_a[payload['sampler_name']]
                     if percent_difference > 0:
@@ -226,7 +228,7 @@ class Worker:
                         eta += (eta * abs((percent_difference / 100)))
                 except KeyError:
                     logger.warn(f"Sampler '{payload['sampler_name']}' efficiency is not recorded.\n")
-                    logger.warn(f"Sampler efficiency will be treated as equivalent to Euler A.")
+                    # in this case the sampler will be treated as having the same efficiency as Euler a
 
             # TODO save and load each workers MPE before the end of session to workers.json.
             #  That way initial estimations are more accurate from the second sdwui session onward
@@ -296,17 +298,9 @@ class Worker:
 
             try:
                 # s_tmax can be float('inf') which is not serializable, so we convert it to the max float value
-                # if payload['s_tmax'] == float('inf'):
-                #     payload['s_tmax'] = 1e308
-
-                # try to serialize JSON
-                try:
-                    _value = json.dumps(payload)
-                except Exception as e:
-                    logger.error(f"Could not serialize payload to JSON for worker '{self.uuid}'... Payload: \n{payload}")
-                    logger.error(e)
-                    self.state = State.IDLE
-                    return
+                s_tmax = payload.get('s_tmax', 0.0)
+                if s_tmax > 1e308:
+                    payload['s_tmax'] = 1e308
 
                 start = time.time()
                 response = requests.post(
@@ -357,7 +351,6 @@ class Worker:
 
         t: Thread
         samples = 2  # number of times to benchmark the remote / accuracy
-        warmup_samples = 2  # number of samples to do before recording as a valid sample in order to "warm-up"
 
         logger.info(f"Benchmarking worker '{self.uuid}':\n")
 

@@ -82,9 +82,8 @@ class Script(scripts.Script):
                     interrupt_all_btn.style(full_width=False)
                     interrupt_all_btn.click(Script.ui_connect_interrupt_btn, inputs=[], outputs=[])
 
-                    # TODO
                     # redo benchmarks button
-                    redo_benchmarks_btn = gradio.Button(value='Redo benchmarks')
+                    redo_benchmarks_btn = gradio.Button(value='Redo benchmarks', variant='stop')
                     redo_benchmarks_btn.style(full_width=False)
                     redo_benchmarks_btn.click(Script.ui_connect_benchmark_button, inputs=[], outputs=[])
 

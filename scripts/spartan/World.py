@@ -14,10 +14,11 @@ from threading import Thread
 from inspect import getsourcefile
 from os.path import abspath
 from pathlib import Path
-from modules.processing import process_images
+from modules.processing import process_images, StableDiffusionProcessingTxt2Img
 # from modules.shared import cmd_opts
+import modules.shared as shared
 from scripts.spartan.Worker import Worker
-from scripts.spartan.shared import benchmark_payload, logger
+from scripts.spartan.shared import benchmark_payload, logger, warmup_samples
 # from modules.errors import display
 import gradio as gr
 
@@ -207,6 +208,8 @@ class World:
 
         if rebenchmark:
             saved = False
+            for worker in self.workers:
+                worker.benchmarked = False
 
         if saved:
             workers_info = json.load(open(self.worker_info_path, 'r'))
@@ -327,21 +330,20 @@ class World:
         """
         global benchmark_payload
 
-        master_bench_payload = copy.copy(self.initial_payload)
-
-        # TODO fully clean copied payload of anything that might throw off the calculation
-        master_bench_payload.batch_size = benchmark_payload['batch_size']
-        master_bench_payload.width = benchmark_payload['width']
-        master_bench_payload.height = benchmark_payload['height']
-        master_bench_payload.steps = benchmark_payload['steps']
-        master_bench_payload.prompt = benchmark_payload['prompt']
-        master_bench_payload.negative_prompt = benchmark_payload['negative_prompt']
-        master_bench_payload.enable_hr = False
-        master_bench_payload.disable_extra_networks = True
+        # wrap our benchmark payload
+        master_bench_payload = StableDiffusionProcessingTxt2Img()
+        for key in benchmark_payload:
+            setattr(master_bench_payload, key, benchmark_payload[key])
+        # Keeps from trying to save the images when we don't know the path. Also, there's not really any reason to.
+        master_bench_payload.do_not_save_samples = True
 
         # make it seem as though this never happened
-        import modules.shared as shared
         state_cache = copy.deepcopy(shared.state)
+        # "warm up" due to initial generation lag
+        for i in range(warmup_samples):
+            process_images(master_bench_payload)
+
+        # get actual sample
         start = time.time()
         process_images(master_bench_payload)
         elapsed = time.time() - start
