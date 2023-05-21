@@ -1,3 +1,5 @@
+import io
+
 import gradio
 import requests
 from typing import List
@@ -11,6 +13,7 @@ import gradio as gr
 from scripts.spartan.shared import benchmark_payload, logger, warmup_samples
 from enum import Enum
 import json
+import base64
 
 
 class InvalidWorkerResponse(Exception):
@@ -310,6 +313,16 @@ class Worker:
                 payload.pop('cached_c', None)
                 payload.pop('uc', None)
                 payload.pop('c', None)
+                # if img2img then we need to b64 encode the init images
+                init_images = payload.get('init_images', None)
+                if init_images is not None:
+                    images = []
+                    for image in init_images:
+                        buffer = io.BytesIO()
+                        image.save(buffer, format="PNG")
+                        image = 'data:image/png;base64,' + str(base64.b64encode(buffer.getvalue()), 'utf-8')
+                        images.append(image)
+                    payload['init_images'] = images
 
                 # see if there is anything else wrong with serializing to payload
                 try:
@@ -320,7 +333,7 @@ class Worker:
 
                 start = time.time()
                 response = requests.post(
-                    self.full_url("txt2img"),
+                    self.full_url("txt2img") if init_images is None else self.full_url("img2img"),
                     json=payload,
                     verify=self.verify_remotes
                 )
