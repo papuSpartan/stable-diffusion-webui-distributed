@@ -191,11 +191,11 @@ class Worker:
         pseudo_payload['width'] = pseudo_width
         pseudo_payload['height'] = pseudo_height
 
-        eta = self.batch_eta(payload=pseudo_payload)
+        eta = self.batch_eta(payload=pseudo_payload, quiet=True)
         return eta
 
     # TODO separate network latency from total eta error
-    def batch_eta(self, payload: dict) -> float:
+    def batch_eta(self, payload: dict, quiet: bool = False) -> float:
         """estimate how long it will take to generate <batch_size> images on a worker in seconds"""
         steps = payload['steps']
         num_images = payload['batch_size']
@@ -236,7 +236,8 @@ class Worker:
             if len(self.eta_percent_error) > 0:
                 correction = eta * (self.eta_mpe() / 100)
 
-                logger.debug(f"worker '{self.uuid}'s last ETA was off by {correction:.2f}%")
+                if not quiet:
+                    logger.debug(f"worker '{self.uuid}'s last ETA was off by {correction:.2f}%")
                 correction_summary = f"correcting '{self.uuid}'s ETA: {eta:.2f}s -> "
                 # do regression
                 if correction > 0:
@@ -244,8 +245,9 @@ class Worker:
                 else:
                     eta += correction
 
-                correction_summary += f"{eta:.2f}s"
-                logger.debug(correction_summary)
+                if not quiet:
+                    correction_summary += f"{eta:.2f}s"
+                    logger.debug(correction_summary)
 
             return eta
         except Exception as e:
@@ -297,10 +299,24 @@ class Worker:
                       f"s) at a speed of {self.avg_ipm} ipm\n")
 
             try:
+                # remove anything that is not serializable
                 # s_tmax can be float('inf') which is not serializable, so we convert it to the max float value
                 s_tmax = payload.get('s_tmax', 0.0)
                 if s_tmax > 1e308:
                     payload['s_tmax'] = 1e308
+                # remove cached tensor from payload as it is not serializable and not needed by the api
+                payload.pop('cached_uc', None)
+                # these three may be fine but the api still definitely does not need them
+                payload.pop('cached_c', None)
+                payload.pop('uc', None)
+                payload.pop('c', None)
+
+                # see if there is anything else wrong with serializing to payload
+                try:
+                    json.dumps(payload)
+                except Exception as e:
+                    logger.error(f"Failed to serialize payload: \n{payload}")
+                    raise e
 
                 start = time.time()
                 response = requests.post(
@@ -332,6 +348,8 @@ class Worker:
                         logger.warn(f"Variance of {variance:.2f}% exceeds threshold of 500%. Ignoring...\n")
 
             except Exception as e:
+                self.state = State.IDLE
+
                 if payload['batch_size'] == 0:
                     raise InvalidWorkerResponse("Tried to request a null amount of images")
                 else:

@@ -316,7 +316,7 @@ class World:
         if worker == fastest_worker:
             return 0
 
-        lag = worker.batch_eta(payload=payload) - fastest_worker.batch_eta(payload=payload)
+        lag = worker.batch_eta(payload=payload, quiet=True) - fastest_worker.batch_eta(payload=payload, quiet=True)
 
         return lag
 
