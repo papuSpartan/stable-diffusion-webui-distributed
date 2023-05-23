@@ -1,8 +1,7 @@
 # stable-diffusion-webui-distributed
-This extension enables you to form a distributed computing system by connecting multiple stable-diffusion-webui instances together.
+This extension enables you to chain multiple webui instances together for txt2img and img2img generation tasks.
 
-The main goal is to maximize concurrency and minimize the latency of large-scale image generation in the main sdwui instance.\
-In practice, this means being able to tell a bunch of machines to generate images at the same time and have them sent right back to your controlling machine. 
+There is an emphasis on minimizing the perceived latency/lag of large batch jobs in the **main** sdwui instance.
 
 ![alt text](doc/sdwui_distributed.drawio.png)\
 *Diagram showing Master/slave architecture of the extension*
@@ -21,12 +20,15 @@ set COMMANDLINE_ARGS=--distributed-remotes laptop:192.168.1.3:7860 argon:fake.lo
 
 On each slave instance:
 - enable the api by passing `--api` and ensure it is listening by using `--listen`
-- ensure all of the models, scripts, and whatever else you think you might request from the master is present\
+- ensure all of the models, scripts, and whatever else you think you might request from them is present\
+Ie. if you're using sd-1.5 on the controlling instance, then the sd-1.5 model should also be present on each slave instance. Otherwise, the remote will fallback to some other model that **is** present.
+
 *if you want to sync models and etc. between a huge amount of nodes you might want to use something like rsync or winscp*
 
 # Usage Notes
-- If benchmarking fails, just delete the workers.json file generated in the extension folder and try again.
+- If benchmarking fails, try hitting the **Redo benchmark** button under the script's **Util** tab.
 - You need to have all of the workers you plan to use connected when benchmarking for things to work properly (will be fixed later).
+- If any remote is taking far too long to returns its share of the batch, you can hit the **Interrupt** button in the **Util** tab.
 
 #### Command-line arguments
 
@@ -54,4 +56,4 @@ worker 'argon' - 3 images
 The reason it works like this is the following:
 - 'laptop' is the fastest real-time worker at 20 ipm so it (initially) gets dealt an equal share of 4 images
 - both of the other workers are considered 'complementary' workers because they cannot keep up with 'laptop' **enough***
-- because of my goal for this extension, both 'complementary' workers will calculate how much, in addition, they **can** make in the time that 'laptop' will take to make the main 12.
+- both 'complementary' workers will then calculate how much, in addition, they **can** make in the time that 'laptop' will take to make the main 12.
