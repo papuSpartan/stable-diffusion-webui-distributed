@@ -36,24 +36,3 @@ Ie. if you're using sd-1.5 on the controlling instance, then the sd-1.5 model sh
 **--distributed-skip-verify-remotes** Disable verification of remote worker TLS certificates (useful for if you are using self-signed certs like with auto tls-https)\
 **--distributed-remotes-autosave** Enable auto-saving of remote worker generations\
 **--distributed-debug** Enable debug information
-
-# How it works
-Say you want to generate 12 images and you hit the generate button on the master instance:
-1. If there is no workers.json file, it will benchmark every machine(worker) and save that information to workers.json
-2. Assume we have 3 workers, with each worker measured to run at ~20ipm. Images will be split equally among them.
-3. The master instance (the UI you are looking at) will begin generating its portion of the images(4) like it would if you had set the batch_size slider to 4 normally
-4. Once the 4 images are done and the image viewer appears, the extension will start adding all of the images received from the remote machines to the gallery.
-5. Profit?
-
-That was the simple case though, step 2 gets much more complicated if the machines' compute speeds and/or memory sizes are much different. For example, a setup which utilizes 3 distinct workers that operate at 5, 15, and 20 ipm each would have the following job assignment if the master instance requests 12 images:
-```
-After job optimization, job layout is the following:
-worker 'master' - 8 images
-worker 'laptop' - 12 images
-worker 'argon' - 3 images
-```
-
-The reason it works like this is the following:
-- 'laptop' is the fastest real-time worker at 20 ipm so it (initially) gets dealt an equal share of 4 images
-- both of the other workers are considered 'complementary' workers because they cannot keep up with 'laptop' **enough***
-- both 'complementary' workers will then calculate how much, in addition, they **can** make in the time that 'laptop' will take to make the main 12.
