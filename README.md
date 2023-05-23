@@ -10,13 +10,8 @@ In practice, this means being able to tell a bunch of machines to generate image
 **Contributions and feedback are much appreciated!**
 
 ## Installation
-**DISCLAIMER - I do NOT recommend casual users use this yet unless you are okay with the possibility of severe instability**
 
 On the master instance:
-- Apply the patch for the [dev branch of sdwui](https://github.com/AUTOMATIC1111/stable-diffusion-webui/tree/dev) which is up to date with at least [commit 3366e49](https://github.com/AUTOMATIC1111/stable-diffusion-webui/commit/3366e494a1147e570d8527eea19da88edb3a1e0c)
-
-    In your sdwui installation folder: `git apply --ignore-whitespace extensions/stable-diffusion-webui-distributed/0001-patch-in-support-for-distributed-extension.patch`
-
 - Go to the "Extensions" tab and then swap to the "Install from URL" tab
 - Paste https://github.com/papuSpartan/stable-diffusion-webui-distributed.git into "URL for extension's git repository" and click install
 - Ensure that you have setup your `COMMANDLINE_ARGS` include the necessary info on your remote machines. Ex:

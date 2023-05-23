@@ -7,7 +7,7 @@ import io
 import json
 import re
 import gradio
-from modules import scripts, script_callbacks
+from modules import scripts
 from modules import processing
 from threading import Thread
 from PIL import Image
@@ -238,7 +238,6 @@ class Script(scripts.Script):
         """
         worker.response = None
 
-        Script.unregister_callbacks()
         return
 
     @staticmethod
@@ -271,9 +270,6 @@ class Script(scripts.Script):
         if cmd_opts.distributed_remotes is None:
             raise RuntimeError("Distributed - No remotes passed. (Try using `--distributed-remotes`?)")
 
-        # register gallery callback
-        script_callbacks.on_after_batch_processed(Script.add_to_gallery)
-
         Script.initialize(initial_payload=p)
 
         # encapsulating the request object within a txt2imgreq object is deprecated and no longer works
@@ -293,6 +289,7 @@ class Script(scripts.Script):
             "sd_vae": vae
         }
 
+        # start generating images assigned to remote machines
         sync = False  # should only really to sync once per job
         Script.world.optimize_jobs(payload)  # optimize work assignment before dispatching
         for job in Script.world.jobs:
@@ -315,12 +312,9 @@ class Script(scripts.Script):
         # if master batch size was changed again due to optimization change it to the updated value
         p.batch_size = Script.world.get_master_batch_size()
         Script.master_start = time.time()
-        # return processing.process_images(p, *args)
 
-    @staticmethod
-    def unregister_callbacks():
-        script_callbacks.remove_current_script_callbacks()
+        # generate images assigned to local machine
+        processed = processing.process_images(p, *args)
+        Script.add_to_gallery(processed, p)
 
-
-# not actually called when user selects a different script in the ui dropdown
-script_callbacks.on_script_unloaded(Script.unregister_callbacks)
+        return processed
