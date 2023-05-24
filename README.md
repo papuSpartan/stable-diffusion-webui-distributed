@@ -11,8 +11,7 @@ There is an emphasis on minimizing the perceived latency/lag of large batch jobs
 ## Installation
 
 On the master instance:
-- Go to the "Extensions" tab and then swap to the "Install from URL" tab
-- Paste https://github.com/papuSpartan/stable-diffusion-webui-distributed.git into "URL for extension's git repository" and click install
+- Go to the extensions tab, and swap to the "available" sub-tab. Then, search "Distributed", and hit install on this extension.
 - Ensure that you have setup your `COMMANDLINE_ARGS` include the necessary info on your remote machines. Ex:
 ```
 set COMMANDLINE_ARGS=--distributed-remotes laptop:192.168.1.3:7860 argon:fake.local:7860 --distributed-skip-verify-remotes --distributed-remotes-autosave
