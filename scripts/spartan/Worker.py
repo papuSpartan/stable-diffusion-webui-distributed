@@ -403,7 +403,7 @@ class Worker:
         # TODO look into how and why this "warmup" happens
         self.state = State.WORKING
         for i in range(0, samples + warmup_samples):  # run some extra times so that the remote can "warm up"
-            t = Thread(target=self.request, args=(benchmark_payload, None, False,))
+            t = Thread(target=self.request, name=self.uuid, args=(benchmark_payload, None, False,))
             try:  # if the worker is unreachable/offline then handle that here
                 t.start()
                 start = time.time()
@@ -437,16 +437,19 @@ class Worker:
         return avg_ipm
 
     def refresh_checkpoints(self):
-
-        response = requests.post(
+        model_response = requests.post(
             self.full_url('refresh-checkpoints'),
             json={},
             verify=self.verify_remotes
         )
+        lora_response = requests.post(
+            self.full_url('refresh-loras'),
+            json={},
+            verify=self.verify_remotes
+        )
 
-        if response.status_code == 200:
-            self.state = State.INTERRUPTED
-            logger.debug(f"successfully refreshed checkpoints for worker '{self.uuid}'")
+        if model_response.status_code != 200 or lora_response.status_code != 200:
+            logger.error(f"Failed to refresh models for worker '{self.uuid}'")
 
     def interrupt(self):
         response = requests.post(

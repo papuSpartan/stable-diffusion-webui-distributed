@@ -192,13 +192,6 @@ class Script(scripts.Script):
 
                 # params
                 processed.all_prompts.append(image_params["prompt"])
-                # for k in vars(processed):
-                #     try:
-                #         if image_params[k] is not None:
-                #             print(f"processed: '{processed.k}'\nparams: '{image_params[k]}'\n")
-                #     except Exception as e:
-                #         print(e)
-
                 # post-generation
                 processed.all_seeds.append(image_info_post["all_seeds"][i])
                 processed.all_subseeds.append(image_info_post["all_subseeds"][i])
@@ -217,7 +210,6 @@ class Script(scripts.Script):
                 processed.infotexts.append(this_info_text)
 
                 # save image to local disk if desired
-                # TODO add command line toggle for having worker results saved to disk
                 if cmd_opts.distributed_remotes_autosave:
                     save_image(
                         image,
