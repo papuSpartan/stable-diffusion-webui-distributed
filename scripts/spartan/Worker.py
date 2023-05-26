@@ -243,10 +243,7 @@ class Worker:
                     logger.debug(f"worker '{self.uuid}'s last ETA was off by {correction:.2f}%")
                 correction_summary = f"correcting '{self.uuid}'s ETA: {eta:.2f}s -> "
                 # do regression
-                if correction > 0:
-                    eta -= correction
-                else:
-                    eta += correction
+                eta -= correction
 
                 if not quiet:
                     correction_summary += f"{eta:.2f}s"
@@ -292,7 +289,6 @@ class Worker:
                     json=option_payload,
                     verify=self.verify_remotes
                 )
-                self.response = options_response
                 # TODO api returns 200 even if it fails to successfully set the checkpoint so we will have to make a
                 #  second GET to see if everything loaded...
 
@@ -448,8 +444,11 @@ class Worker:
             verify=self.verify_remotes
         )
 
-        if model_response.status_code != 200 or lora_response.status_code != 200:
-            logger.error(f"Failed to refresh models for worker '{self.uuid}'")
+        if model_response.status_code != 200:
+            logger.error(f"Failed to refresh models for worker '{self.uuid}'\nCode <{model_response.status_code}>")
+
+        if lora_response.status_code != 200:
+            logger.error(f"Failed to refresh LORA's for worker '{self.uuid}'\nCode <{lora_response.status_code}>")
 
     def interrupt(self):
         response = requests.post(

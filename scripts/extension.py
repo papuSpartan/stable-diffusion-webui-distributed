@@ -166,7 +166,7 @@ class Script(scripts.Script):
 
         # get master ipm by estimating based on worker speed
         master_elapsed = time.time() - Script.master_start
-        logger.debug(f"Took master {master_elapsed}s")
+        logger.debug(f"Took master {master_elapsed:.2f}s")
 
         # wait for response from all workers
         for thread in Script.worker_threads:
@@ -176,7 +176,7 @@ class Script(scripts.Script):
             # if it fails here then that means that the response_cache global var is not being filled for some reason
             try:
                 images: json = worker.response["images"]
-            except TypeError:
+            except Exception:
                 if worker.master is False:
                     logger.warn(f"Worker '{worker.uuid}' had nothing")
                 continue
@@ -263,6 +263,21 @@ class Script(scripts.Script):
             raise RuntimeError("Distributed - No remotes passed. (Try using `--distributed-remotes`?)")
 
         Script.initialize(initial_payload=p)
+
+        # strip scripts that aren't yet supported and warn user
+        for arg in range(0, len(p.script_args) - 1):
+            try:
+                json.dumps(p.script_args[arg])
+            except Exception:
+                sanitized_script_args = p.script_args[:arg] + p.script_args[arg + 1:]
+                p.script_args = sanitized_script_args
+
+                # find which script owns the offending arguments
+                for script in p.scripts.scripts:
+                    title = script.title()
+
+                    if script.args_from <= arg <= script.args_to:
+                        logger.warn(f"Distributed does not yet support '{title}'")
 
         # encapsulating the request object within a txt2imgreq object is deprecated and no longer works
         # see test/basic_features/txt2img_test.py for an example
