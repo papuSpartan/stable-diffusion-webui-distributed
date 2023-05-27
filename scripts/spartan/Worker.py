@@ -334,6 +334,9 @@ class Worker:
                     verify=self.verify_remotes
                 )
                 self.response = response.json()
+                if response.status_code != 200:
+                    logger.error(f"'{self.uuid}' response: Code <{response.status_code}> {str(response.content, 'utf-8')}")
+                    raise InvalidWorkerResponse()
 
                 # update list of ETA accuracy
                 if self.benchmarked and not self.state == State.INTERRUPTED:
