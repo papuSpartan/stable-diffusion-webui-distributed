@@ -76,6 +76,7 @@ class World:
 
     def __init__(self, initial_payload, verify_remotes: bool = True):
         master_worker = Worker(master=True)
+        self.original_batch_size: int = 0
         self.total_batch_size: int = 0
         self.workers: List[Worker] = [master_worker]
         self.jobs: List[Job] = []
@@ -96,9 +97,11 @@ class World:
         world_size = self.get_world_size()
         if total_batch_size < world_size:
             self.total_batch_size = world_size
+            self.original_batch_size = world_size
             logger.debug(f"Defaulting to a total batch size of '{world_size}' in order to accommodate all workers")
         else:
             self.total_batch_size = total_batch_size
+            self.original_batch_size = total_batch_size
 
         default_worker_batch_size = self.get_default_worker_batch_size()
         self.sync_master(batch_size=default_worker_batch_size)
@@ -383,6 +386,8 @@ class World:
         # the maximum amount of images that a "slow" worker can produce in the slack space where other nodes are working
         # max_compensation = 4 currently unused
         images_per_job = None
+        
+        batch_delta = self.original_batch_size % (payload['batch_size'] * len(self.workers)) # find delta between images to be generated and total images requested
 
         for job in self.jobs:
 
@@ -390,6 +395,9 @@ class World:
 
             if lag < self.job_timeout or lag == 0:
                 job.batch_size = payload['batch_size']
+                if batch_delta > 0:
+                    job.batch_size += 1
+                    batch_delta -= 1
                 continue
 
             logger.debug(f"worker '{job.worker.uuid}' would stall the image gallery by ~{lag:.2f}s\n")
