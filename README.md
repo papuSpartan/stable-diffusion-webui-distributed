@@ -8,7 +8,7 @@ There is an emphasis on minimizing the perceived latency/lag of large batch jobs
 
 **Contributions and feedback are much appreciated!**
 
-[![](https://dcbadge.vercel.app/api/server/Jpc8wnftd4)](https://discord.gg/INVITEID)
+[![](https://dcbadge.vercel.app/api/server/Jpc8wnftd4)](https://discord.gg/Jpc8wnftd4)
 
 ## Installation
 
