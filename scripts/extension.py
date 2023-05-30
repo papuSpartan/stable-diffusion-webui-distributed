@@ -145,7 +145,7 @@ class Script(scripts.Script):
             for worker in Script.world.workers:
                 if worker.master:
                     continue
-
+                worker.check_connectivity() # check if worker is online
                 worker_status += f"{worker.uuid} at {worker.address} is {worker.state.name}\n"
 
             # TODO replace this with a single check to a state flag that we should make in the world class
@@ -363,8 +363,13 @@ class Script(scripts.Script):
         p.batch_size = Script.world.get_master_batch_size()
         Script.master_start = time.time()
 
+        available_workers = sum(1 for worker in Script.world.workers if worker.state != State.UNAVAILABLE)
         # generate images assigned to local machine
-        processed = processing.process_images(p, *args)
-        Script.add_to_gallery(processed, p)
+        if available_workers > 1:
+            p.do_not_save_grid = True
+            processed = processing.process_images(p, *args)
+            Script.add_to_gallery(processed, p)
+        else:
+            processed = processing.process_images(p, *args)
 
         return processed

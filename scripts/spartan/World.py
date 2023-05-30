@@ -17,7 +17,7 @@ from pathlib import Path
 from modules.processing import process_images, StableDiffusionProcessingTxt2Img
 # from modules.shared import cmd_opts
 import modules.shared as shared
-from scripts.spartan.Worker import Worker
+from scripts.spartan.Worker import Worker, State
 from scripts.spartan.shared import benchmark_payload, logger, warmup_samples
 # from modules.errors import display
 import gradio as gr
@@ -125,7 +125,7 @@ class World:
         Returns:
             int: The number of nodes currently registered in the world.
         """
-        return len(self.workers)
+        return sum(1 for worker in self.workers if worker.state != State.UNAVAILABLE)
 
     def sync_master(self, batch_size: int):
         """
@@ -180,7 +180,7 @@ class World:
         threads: List[Thread] = []
 
         for worker in self.workers:
-            if worker.master:
+            if worker.master or worker.state == State.UNAVAILABLE:
                 continue
 
             t = Thread(target=worker.interrupt, args=())
@@ -190,7 +190,7 @@ class World:
         threads: List[Thread] = []
 
         for worker in self.workers:
-            if worker.master:
+            if worker.master or worker.state == State.UNAVAILABLE:
                 continue
 
             t = Thread(target=worker.refresh_checkpoints, args=())
@@ -216,7 +216,9 @@ class World:
 
         # benchmark all nodes
         for worker in self.workers:
-
+            if  worker.state == State.UNAVAILABLE:
+                continue
+            
             if not saved:
                 if worker.master:
                     self.master().avg_ipm = self.benchmark_master()
@@ -368,6 +370,9 @@ class World:
             if worker.master:
                 self.master_job().batch_size = default_job_size
                 continue
+            
+            if worker.state == State.UNAVAILABLE:
+                continue
 
             batch_size = default_job_size
             self.jobs.append(Job(worker=worker, batch_size=batch_size))
@@ -383,6 +388,9 @@ class World:
         # the maximum amount of images that a "slow" worker can produce in the slack space where other nodes are working
         # max_compensation = 4 currently unused
         images_per_job = None
+        
+        available_workers = sum(1 for worker in self.workers if worker.state != State.UNAVAILABLE)
+        batch_delta = self.original_batch_size % (payload['batch_size'] * available_workers) # find delta between images to be generated and total images requested
 
         for job in self.jobs:
 
@@ -390,6 +398,9 @@ class World:
 
             if lag < self.job_timeout or lag == 0:
                 job.batch_size = payload['batch_size']
+                if batch_delta > 0:
+                    job.batch_size += 1
+                    batch_delta -= 1
                 continue
 
             logger.debug(f"worker '{job.worker.uuid}' would stall the image gallery by ~{lag:.2f}s\n")

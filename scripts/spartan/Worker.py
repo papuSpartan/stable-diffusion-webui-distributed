@@ -29,6 +29,7 @@ class State(Enum):
     IDLE = 1
     WORKING = 2
     INTERRUPTED = 3
+    UNAVAILABLE = 4
 
 
 class Worker:
@@ -117,6 +118,15 @@ class Worker:
 
         if uuid is not None:
             self.uuid = uuid
+        
+        # check status when we init each worker.    
+        try:
+            memory = requests.get(
+                self.full_url("memory"),
+                verify=self.verify_remotes
+            )
+        except requests.exceptions.ConnectionError as e:
+            self.state = State.UNAVAILABLE
 
     def __str__(self):
         return f"{self.address}:{self.port}"
@@ -487,3 +497,14 @@ class Worker:
         if response.status_code == 200:
             self.state = State.INTERRUPTED
             logger.debug(f"successfully interrupted worker {self.uuid}")
+            
+    def check_connectivity(self):
+        try:
+            memory = requests.get(
+                self.full_url("memory"),
+                verify=self.verify_remotes
+            )
+            if memory.status_code == 200:
+                self.state = State.IDLE
+        except requests.exceptions.ConnectionError as e:
+            self.state = State.UNAVAILABLE
