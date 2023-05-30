@@ -14,6 +14,8 @@ from scripts.spartan.shared import benchmark_payload, logger, warmup_samples
 from enum import Enum
 import json
 import base64
+import queue
+from modules.shared import state as master_state
 
 
 class InvalidWorkerResponse(Exception):
@@ -327,18 +329,40 @@ class Worker:
                     logger.error(f"Failed to serialize payload: \n{payload}")
                     raise e
 
+                # the main api requests sent to either the txt2img or img2img route
+                response_queue = queue.Queue()
+                def preemptable_request(response_queue):
+                    try:
+                        response = requests.post(
+                            self.full_url("txt2img") if init_images is None else self.full_url("img2img"),
+                            json=payload,
+                            verify=self.verify_remotes
+                        )
+                        response_queue.put(response)
+                    except Exception as e:
+                        response_queue.put(e)  # forwarding thrown exceptions to parent thread
+                request_thread = Thread(target=preemptable_request, args=(response_queue,))
+                interrupting = False
                 start = time.time()
-                response = requests.post(
-                    self.full_url("txt2img") if init_images is None else self.full_url("img2img"),
-                    json=payload,
-                    verify=self.verify_remotes
-                )
+                request_thread.start()
+                while request_thread.is_alive():
+                    if interrupting is False and master_state.interrupted is True:
+                        self.interrupt()
+                        interrupting = True
+                    time.sleep(0.5)
+
+                result = response_queue.get()
+                if isinstance(result, Exception):
+                    raise result
+                else:
+                    response = result
+
                 self.response = response.json()
                 if response.status_code != 200:
                     logger.error(f"'{self.uuid}' response: Code <{response.status_code}> {str(response.content, 'utf-8')}")
                     raise InvalidWorkerResponse()
 
-                # update list of ETA accuracy
+                # update list of ETA accuracy if state is valid
                 if self.benchmarked and not self.state == State.INTERRUPTED:
                     self.response_time = time.time() - start
                     variance = ((eta - self.response_time) / self.response_time) * 100
