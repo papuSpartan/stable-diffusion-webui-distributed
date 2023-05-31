@@ -353,7 +353,7 @@ class World:
 
         ipm = benchmark_payload['batch_size'] / (elapsed / 60)
 
-        logger.debug(f"Master benchmark took {elapsed}: {ipm} ipm")
+        logger.debug(f"Master benchmark took {elapsed:.2f}: {ipm:.2f} ipm")
         self.master().benchmarked = True
         return ipm
 
