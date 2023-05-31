@@ -264,6 +264,18 @@ class Script(scripts.Script):
             iteration=0  # not sure exactly what to do with this yet
         )
         processed.infotexts.append(this_info_text)
+        
+        # save image to local disk if desired
+        if cmd_opts.distributed_remotes_autosave:
+            save_image(
+                grid,
+                p.outpath_samples,
+                "",
+                processed.all_seeds[i],
+                processed.all_prompts[i],
+                opts.samples_format,
+                info=this_info_text
+            )
 
         p.batch_size = total_images + 1 # we have one more than the batch size due to the grid, Unsure if we need to set?
         """
