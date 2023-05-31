@@ -289,44 +289,38 @@ class Script(scripts.Script):
         Script.initialize(initial_payload=p)
 
         # strip scripts that aren't yet supported and warn user
-        controlnet = None
-        arg = 0
-        while arg < len(p.script_args) - 1:
-            try:
-                json.dumps(p.script_args[arg])
-            except Exception:
+        packed_script_args: List[dict] = []  # list of api formatted per-script argument objects
+        for script in p.scripts.scripts:
+            if script.alwayson is not True:
+                continue
+            title = script.title()
 
-                # find which script owns the offending arguments and fix if supported
-                script_args_upper = None  # the upper index of the offending scripts args so that we can skip the rest
-                for script in p.scripts.scripts:
-                    title = script.title()
+            # check for supported scripts
+            if title == "ControlNet":
+                # grab all controlnet units
+                cn_units = []
+                cn_args = p.script_args[script.args_from:script.args_to]
+                for cn_arg in cn_args:
+                    if type(cn_arg).__name__ == "UiControlNetUnit":
+                        cn_units.append(cn_arg)
+                logger.debug(f"Detected {len(cn_units)} controlnet unit(s)")
 
-                    # check for supported scripts
-                    if title == "ControlNet" and script.alwayson is True:
-                        # grab all controlnet units
-                        cn_units = []
-                        for cn_arg in range(script.args_from, script.args_to + 1):
-                            if isinstance(p.script_args[cn_arg], type(p.script_args[arg])):
-                                cn_units.append(p.script_args[cn_arg])
-                        logger.debug(f"Detected {len(cn_units)} controlnet unit(s)")
+                # get api formatted controlnet
+                packed_script_args.append(pack_control_net(cn_units))
 
-                        # get api formatted controlnet
-                        controlnet: dict = pack_control_net(cn_units)
+                continue
+            else:
+                script_serial = {
+                    script.name: {'args': []}
+                }
 
-                        # ensure we don't do this more than once
-                        script_args_upper = script.args_to
-                        continue
+                this_args = p.script_args[script.args_from:script.args_to]
+                this_args = json.dumps(this_args, default=lambda k: '<not serializable>')
+                script_serial[script.name]['args'] = this_args
 
-                    # clean unsupported scripts
-                    if script.args_from <= arg <= script.args_to:
-                        logger.warn(f"Distributed does not yet support '{title}'")
-                        sanitized_script_args = p.script_args[:arg] + p.script_args[arg + 1:]
-                        p.script_args = sanitized_script_args
+                packed_script_args.append(script_serial)
+                logger.warning(f"Distributed doesn't officially support '{title}'")
 
-                if script_args_upper is not None:
-                    arg = script_args_upper
-
-            arg += 1
 
         # encapsulating the request object within a txt2imgreq object is deprecated and no longer works
         # see test/basic_features/txt2img_test.py for an example
@@ -335,8 +329,9 @@ class Script(scripts.Script):
         payload['scripts'] = None
         del payload['script_args']
 
-        if controlnet is not None:
-            payload['alwayson_scripts'] = controlnet
+        payload['alwayson_scripts'] = {}
+        for packed in packed_script_args:
+            payload['alwayson_scripts'].update(packed)
 
         # TODO api for some reason returns 200 even if something failed to be set.
         #  for now we may have to make redundant GET requests to check if actually successful...
