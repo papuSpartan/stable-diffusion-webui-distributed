@@ -440,7 +440,7 @@ class World:
         #  It might be better to just inject a black image. (if master is that slow)
         master_job = self.master_job()
         if master_job.batch_size < 1:
-            logger.warn("Master couldn't keep up... defaulting to 1 image")
+            logger.warning("Master couldn't keep up... defaulting to 1 image")
             master_job.batch_size = 1
 
         logger.info("Job distribution:")

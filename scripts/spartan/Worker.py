@@ -232,7 +232,7 @@ class Worker:
                     else:
                         eta += (eta * abs((percent_difference / 100)))
                 except KeyError:
-                    logger.warn(f"Sampler '{payload['sampler_name']}' efficiency is not recorded.\n")
+                    logger.warning(f"Sampler '{payload['sampler_name']}' efficiency is not recorded.\n")
                     # in this case the sampler will be treated as having the same efficiency as Euler a
 
             # TODO save and load each workers MPE before the end of session to workers.json.
@@ -381,7 +381,7 @@ class Worker:
                         else:  # normal case
                             self.eta_percent_error.append(variance)
                     else:
-                        logger.warn(f"Variance of {variance:.2f}% exceeds threshold of 500%. Ignoring...\n")
+                        logger.warning(f"Variance of {variance:.2f}% exceeds threshold of 500%. Ignoring...\n")
 
             except Exception as e:
                 self.state = State.IDLE

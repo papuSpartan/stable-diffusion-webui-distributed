@@ -230,7 +230,7 @@ class Script(scripts.Script):
                     logger.debug(f"Requested {expected_images} images from '{worker.uuid}', got {len(images)}")
             except Exception:
                 if worker.master is False:
-                    logger.warn(f"Worker '{worker.uuid}' had nothing")
+                    logger.warning(f"Worker '{worker.uuid}' had nothing")
                 continue
 
             # visibly add work from workers to the image gallery
@@ -266,7 +266,7 @@ class Script(scripts.Script):
 
         if Script.world is None:
             if Script.verify_remotes is False:
-                logger.warn(f"You have chosen to forego the verification of worker TLS certificates")
+                logger.warning(f"You have chosen to forego the verification of worker TLS certificates")
                 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
             # construct World
