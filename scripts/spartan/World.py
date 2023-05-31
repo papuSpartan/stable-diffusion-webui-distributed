@@ -212,7 +212,8 @@ class World:
                 worker.benchmarked = False
 
         if saved:
-            workers_info = json.load(open(self.worker_info_path, 'r'))
+            with open(self.worker_info_path, 'r') as worker_info_file:
+                workers_info = json.load(worker_info_file)
 
         # benchmark all nodes
         for worker in self.workers:
@@ -234,7 +235,8 @@ class World:
 
             workers_info.update(worker.info(benchmark_payload=benchmark_payload))
 
-        json.dump(workers_info, open(self.worker_info_path, 'w'), indent=3)
+        with open(self.worker_info_path, 'w') as worker_info_file:
+            json.dump(workers_info, worker_info_file, indent=3)
 
     def get_current_output_size(self) -> int:
         """
