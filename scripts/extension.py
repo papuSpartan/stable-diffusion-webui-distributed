@@ -169,6 +169,9 @@ class Script(scripts.Script):
         # get master ipm by estimating based on worker speed
         master_elapsed = time.time() - Script.master_start
         logger.debug(f"Took master {master_elapsed:.2f}s")
+        total_images = 0
+        grid_image_params = json
+        grid_image_info_post = json
 
         # wait for response from all workers
         for thread in Script.worker_threads:
@@ -180,6 +183,8 @@ class Script(scripts.Script):
             for job in Script.world.jobs:
                 if job.worker == worker:
                     expected_images = job.batch_size
+                    total_images += expected_images
+                    
 
             try:
                 images: json = worker.response["images"]
@@ -193,6 +198,8 @@ class Script(scripts.Script):
 
             image_params: json = worker.response["parameters"]
             image_info_post: json = json.loads(worker.response["info"])  # image info known after processing
+            grid_image_params = image_params
+            grid_image_info_post = image_info_post
 
             # visibly add work from workers to the txt2img gallery
             for i in range(0, len(images)):
@@ -236,7 +243,41 @@ class Script(scripts.Script):
                         info=this_info_text
                     )
 
-        p.batch_size = Script.world.get_current_output_size()
+        # generate grid
+        grid = processing.images.image_grid(processed.images, total_images)
+        processed.images.append(grid)
+        
+        # post grid generation
+        processed.all_prompts.append(grid_image_params["prompt"])
+        processed.all_seeds.append(grid_image_info_post["all_seeds"][i])
+        processed.all_subseeds.append(grid_image_info_post["all_subseeds"][i])
+        processed.all_negative_prompts.append(grid_image_info_post["all_negative_prompts"][i])
+
+        # generate info-text string (mostly for user use)
+        this_info_text = processing.create_infotext(
+            p,
+            processed.all_prompts,
+            processed.all_seeds,
+            processed.all_subseeds,
+            comments=[""],
+            position_in_batch=i + p.batch_size,
+            iteration=0  # not sure exactly what to do with this yet
+        )
+        processed.infotexts.append(this_info_text)
+        
+        # save image to local disk if desired
+        if cmd_opts.distributed_remotes_autosave:
+            save_image(
+                grid,
+                p.outpath_samples,
+                "",
+                processed.all_seeds[i],
+                processed.all_prompts[i],
+                opts.samples_format,
+                info=this_info_text
+            )
+
+        p.batch_size = total_images + 1 # we have one more than the batch size due to the grid, Unsure if we need to set?
         """
         This ensures that we don't get redundant outputs in a certain case: 
         We have 3 workers and we get 3 responses back.
@@ -364,6 +405,7 @@ class Script(scripts.Script):
         Script.master_start = time.time()
 
         # generate images assigned to local machine
+        p.do_not_save_grid = True # don't generate grid from master as we are doing this later.
         processed = processing.process_images(p, *args)
         Script.add_to_gallery(processed, p)
 
