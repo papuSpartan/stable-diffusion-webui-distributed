@@ -310,16 +310,8 @@ class Script(scripts.Script):
 
                 continue
             else:
-                script_serial = {
-                    script.name: {'args': []}
-                }
-
-                this_args = p.script_args[script.args_from:script.args_to]
-                this_args = json.dumps(this_args, default=lambda k: '<not serializable>')
-                script_serial[script.name]['args'] = this_args
-
-                packed_script_args.append(script_serial)
-                logger.warning(f"Distributed doesn't officially support '{title}'")
+                # https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111/issues/12#issuecomment-1480382514
+                logger.warning(f"Distributed doesn't yet support '{title}'")
 
 
         # encapsulating the request object within a txt2imgreq object is deprecated and no longer works
