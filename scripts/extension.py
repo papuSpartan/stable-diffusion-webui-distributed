@@ -166,12 +166,51 @@ class Script(scripts.Script):
     def add_to_gallery(processed, p):
         """adds generated images to the image gallery after waiting for all workers to finish"""
 
+        def processed_inject_image(image, info_index, save_path_override=None):
+            image_params: json = worker.response["parameters"]
+            image_info_post: json = json.loads(worker.response["info"])  # image info known after processing
+
+            try:
+                # some metadata
+                processed.all_seeds.append(image_info_post["all_seeds"][info_index])
+                processed.all_subseeds.append(image_info_post["all_subseeds"][info_index])
+                processed.all_negative_prompts.append(image_info_post["all_negative_prompts"][info_index])
+            except Exception:
+                # like with controlnet masks, there isn't always full post-gen info, so we use the first images'
+                logger.debug(f"Image at index {i} for '{worker.uuid}' was missing some post-generation data")
+                processed_inject_image(image=image, info_index=0)
+                return
+
+            processed.all_prompts.append(image_params["prompt"])
+            processed.images.append(image)  # actual received image
+
+            # generate info-text string
+            info_text = processing.create_infotext(
+                p,
+                processed.all_prompts,
+                processed.all_seeds,
+                processed.all_subseeds,
+                comments=[""],
+                position_in_batch=i + p.batch_size,
+                iteration=0  # not sure exactly what to do with this yet
+            )
+            processed.infotexts.append(info_text)
+
+            # automatically save received image to local disk if desired
+            if cmd_opts.distributed_remotes_autosave:
+                save_image(
+                    image,
+                    p.outpath_samples if save_path_override is None else save_path_override,
+                    "",
+                    processed.all_seeds[i],
+                    processed.all_prompts[i],
+                    opts.samples_format,
+                    info=info_text
+                )
+
         # get master ipm by estimating based on worker speed
         master_elapsed = time.time() - Script.master_start
         logger.debug(f"Took master {master_elapsed:.2f}s")
-        total_images = 0
-        grid_image_params = json
-        grid_image_info_post = json
 
         # wait for response from all workers
         for thread in Script.worker_threads:
@@ -183,8 +222,6 @@ class Script(scripts.Script):
             for job in Script.world.jobs:
                 if job.worker == worker:
                     expected_images = job.batch_size
-                    total_images += expected_images
-                    
 
             try:
                 images: json = worker.response["images"]
@@ -196,88 +233,19 @@ class Script(scripts.Script):
                     logger.warn(f"Worker '{worker.uuid}' had nothing")
                 continue
 
-            image_params: json = worker.response["parameters"]
-            image_info_post: json = json.loads(worker.response["info"])  # image info known after processing
-            grid_image_params = image_params
-            grid_image_info_post = image_info_post
-
-            # visibly add work from workers to the txt2img gallery
+            # visibly add work from workers to the image gallery
             for i in range(0, len(images)):
                 image_bytes = base64.b64decode(images[i])
                 image = Image.open(io.BytesIO(image_bytes))
-                processed.images.append(image)
 
-                processed.all_prompts.append(image_params["prompt"])
-                try:
-                    # post-generation
-                    processed.all_seeds.append(image_info_post["all_seeds"][i])
-                    processed.all_subseeds.append(image_info_post["all_subseeds"][i])
-                    processed.all_negative_prompts.append(image_info_post["all_negative_prompts"][i])
-                except Exception as e:
-                    logger.debug(f"Image at index {i} for '{worker.uuid}' was missing some post-generation data")
-                    processed.all_seeds.append(image_info_post["all_seeds"][0])
-                    processed.all_subseeds.append(image_info_post["all_subseeds"][0])
-                    processed.all_negative_prompts.append(image_info_post["all_negative_prompts"][0])
+                # inject image
+                processed_inject_image(image=image, info_index=i)
 
-                # generate info-text string (mostly for user use)
-                this_info_text = processing.create_infotext(
-                    p,
-                    processed.all_prompts,
-                    processed.all_seeds,
-                    processed.all_subseeds,
-                    comments=[""],
-                    position_in_batch=i + p.batch_size,
-                    iteration=0  # not sure exactly what to do with this yet
-                )
-                processed.infotexts.append(this_info_text)
+            # generate and inject grid
+            grid = processing.images.image_grid(processed.images, len(processed.images))
+            processed_inject_image(image=grid, info_index=0, save_path_override=p.outpath_grids)
 
-                # save image to local disk if desired
-                if cmd_opts.distributed_remotes_autosave:
-                    save_image(
-                        image,
-                        p.outpath_samples,
-                        "",
-                        processed.all_seeds[i],
-                        processed.all_prompts[i],
-                        opts.samples_format,
-                        info=this_info_text
-                    )
-
-        # generate grid
-        grid = processing.images.image_grid(processed.images, total_images)
-        processed.images.append(grid)
-        
-        # post grid generation
-        processed.all_prompts.append(grid_image_params["prompt"])
-        processed.all_seeds.append(grid_image_info_post["all_seeds"][i])
-        processed.all_subseeds.append(grid_image_info_post["all_subseeds"][i])
-        processed.all_negative_prompts.append(grid_image_info_post["all_negative_prompts"][i])
-
-        # generate info-text string (mostly for user use)
-        this_info_text = processing.create_infotext(
-            p,
-            processed.all_prompts,
-            processed.all_seeds,
-            processed.all_subseeds,
-            comments=[""],
-            position_in_batch=i + p.batch_size,
-            iteration=0  # not sure exactly what to do with this yet
-        )
-        processed.infotexts.append(this_info_text)
-        
-        # save image to local disk if desired
-        if cmd_opts.distributed_remotes_autosave:
-            save_image(
-                grid,
-                p.outpath_samples,
-                "",
-                processed.all_seeds[i],
-                processed.all_prompts[i],
-                opts.samples_format,
-                info=this_info_text
-            )
-
-        p.batch_size = total_images + 1 # we have one more than the batch size due to the grid, Unsure if we need to set?
+        p.batch_size = len(processed.images)
         """
         This ensures that we don't get redundant outputs in a certain case: 
         We have 3 workers and we get 3 responses back.
@@ -405,7 +373,7 @@ class Script(scripts.Script):
         Script.master_start = time.time()
 
         # generate images assigned to local machine
-        p.do_not_save_grid = True # don't generate grid from master as we are doing this later.
+        p.do_not_save_grid = True  # don't generate grid from master as we are doing this later.
         processed = processing.process_images(p, *args)
         Script.add_to_gallery(processed, p)
 
