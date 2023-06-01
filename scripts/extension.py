@@ -349,8 +349,8 @@ class Script(scripts.Script):
                 continue
 
             payload['batch_size'] = job.batch_size
-            payload['subseed'] += 1
-            payload['seed'] += 1 if payload['subseed_strength'] == 0 else 0
+            payload['subseed'] += 1 * p.n_iter
+            payload['seed'] += (1 * p.n_iter) if payload['subseed_strength'] == 0 else 0
 
             if job.worker.loaded_model != name or job.worker.loaded_vae != vae:
                 sync = True
