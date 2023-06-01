@@ -245,9 +245,9 @@ class Script(scripts.Script):
                 # inject image
                 processed_inject_image(image=image, info_index=i)
 
-            # generate and inject grid
-            grid = processing.images.image_grid(processed.images, len(processed.images))
-            processed_inject_image(image=grid, info_index=0, save_path_override=p.outpath_grids)
+        # generate and inject grid
+        grid = processing.images.image_grid(processed.images, len(processed.images))
+        processed_inject_image(image=grid, info_index=0, save_path_override=p.outpath_grids)
 
         p.batch_size = len(processed.images)
         """
