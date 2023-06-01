@@ -191,22 +191,25 @@ class Script(scripts.Script):
                 processed.all_prompts,
                 processed.all_seeds,
                 processed.all_subseeds,
-                comments=[""],
-                position_in_batch=i + p.batch_size,
-                iteration=0  # not sure exactly what to do with this yet
+                # comments=[""], # unimplemented upstream :(
+                # we don't need the "true_image_pos" like below with save_image because this method does it for us
+                position_in_batch=info_index,  # zero-indexed
+                iteration=p.n_iter  # if batch count is 2 p.n_iter will be 2
             )
             processed.infotexts.append(info_text)
 
+            # zero-indexed position of image in total batch (so including master results)
+            true_image_pos = info_index + (p.n_iter * p.batch_size)
             # automatically save received image to local disk if desired
             if cmd_opts.distributed_remotes_autosave:
                 save_image(
-                    image,
-                    p.outpath_samples if save_path_override is None else save_path_override,
-                    "",
-                    processed.all_seeds[i],
-                    processed.all_prompts[i],
-                    opts.samples_format,
-                    info=info_text
+                    image=image,
+                    path=p.outpath_samples if save_path_override is None else save_path_override,
+                    basename="",
+                    seed=processed.all_seeds[true_image_pos],
+                    prompt=processed.all_prompts[true_image_pos],
+                    info=info_text,
+                    extension=opts.samples_format
                 )
 
         # get master ipm by estimating based on worker speed
