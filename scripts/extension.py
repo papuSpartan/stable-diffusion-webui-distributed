@@ -25,6 +25,7 @@ from scripts.spartan.Worker import Worker, State
 from modules.shared import opts
 from scripts.spartan.shared import logger
 from scripts.spartan.control_net import pack_control_net
+from modules.processing import fix_seed
 
 
 # TODO implement SSDP advertisement of some sort in sdwui api to allow extension to automatically discover workers?
@@ -313,7 +314,6 @@ class Script(scripts.Script):
                 # https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111/issues/12#issuecomment-1480382514
                 logger.warning(f"Distributed doesn't yet support '{title}'")
 
-
         # encapsulating the request object within a txt2imgreq object is deprecated and no longer works
         # see test/basic_features/txt2img_test.py for an example
         payload = copy.copy(p.__dict__)
@@ -324,6 +324,11 @@ class Script(scripts.Script):
         payload['alwayson_scripts'] = {}
         for packed in packed_script_args:
             payload['alwayson_scripts'].update(packed)
+
+        # generate seed early for master so that we can calculate the successive seeds for each slave
+        fix_seed(p)
+        payload['seed'] = p.seed
+        payload['subseed'] = p.subseed
 
         # TODO api for some reason returns 200 even if something failed to be set.
         #  for now we may have to make redundant GET requests to check if actually successful...
@@ -344,6 +349,8 @@ class Script(scripts.Script):
                 continue
 
             payload['batch_size'] = job.batch_size
+            payload['subseed'] += 1
+            payload['seed'] += 1 if payload['subseed_strength'] == 0 else 0
 
             if job.worker.loaded_model != name or job.worker.loaded_vae != vae:
                 sync = True
