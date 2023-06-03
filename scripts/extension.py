@@ -167,7 +167,7 @@ class Script(scripts.Script):
     def add_to_gallery(processed, p):
         """adds generated images to the image gallery after waiting for all workers to finish"""
 
-        def processed_inject_image(image, info_index, save_path_override=None):
+        def processed_inject_image(image, info_index, iteration: int, save_path_override=None, grid=False):
             image_params: json = worker.response["parameters"]
             image_info_post: json = json.loads(worker.response["info"])  # image info known after processing
 
@@ -179,35 +179,45 @@ class Script(scripts.Script):
             except Exception:
                 # like with controlnet masks, there isn't always full post-gen info, so we use the first images'
                 logger.debug(f"Image at index {i} for '{worker.uuid}' was missing some post-generation data")
-                processed_inject_image(image=image, info_index=0)
+                processed_inject_image(image=image, info_index=0, iteration=iteration)
                 return
 
             processed.all_prompts.append(image_params["prompt"])
             processed.images.append(image)  # actual received image
 
             # generate info-text string
+            images_per_batch = p.n_iter * p.batch_size
+            # zero-indexed position of image in total batch (so including master results)
+            true_image_pos = len(processed.images) - 1
+            num_remote_images = images_per_batch * p.batch_size
+            if p.n_iter > 1:  # if splitting by batch count
+                num_remote_images *= p.n_iter - 1
+            total_images = num_remote_images + images_per_batch
+            info_text_used_seed_index = info_index + p.n_iter * p.batch_size
+
+            if iteration != 0:
+                logger.debug(f"iteration {iteration}/{p.n_iter}, image {true_image_pos + 1}/{total_images}, info-index: {info_index}, used seed index {info_text_used_seed_index}")
+
             info_text = processing.create_infotext(
-                p,
-                processed.all_prompts,
-                processed.all_seeds,
-                processed.all_subseeds,
+                p=p,
+                all_prompts=processed.all_prompts,
+                all_seeds=processed.all_seeds,
+                all_subseeds=processed.all_subseeds,
                 # comments=[""], # unimplemented upstream :(
                 # we don't need the "true_image_pos" like below with save_image because this method does it for us
-                position_in_batch=info_index,  # zero-indexed
-                iteration=p.n_iter  # if batch count is 2 p.n_iter will be 2
+                position_in_batch=true_image_pos,
+                iteration=0  # if batch count is 2 p.n_iter will be 2
             )
             processed.infotexts.append(info_text)
 
-            # zero-indexed position of image in total batch (so including master results)
-            true_image_pos = info_index + (p.n_iter * p.batch_size)
             # automatically save received image to local disk if desired
             if cmd_opts.distributed_remotes_autosave:
                 save_image(
                     image=image,
                     path=p.outpath_samples if save_path_override is None else save_path_override,
                     basename="",
-                    seed=processed.all_seeds[true_image_pos],
-                    prompt=processed.all_prompts[true_image_pos],
+                    seed=processed.all_seeds[-1],
+                    prompt=processed.all_prompts[-1],
                     info=info_text,
                     extension=opts.samples_format
                 )
@@ -220,6 +230,7 @@ class Script(scripts.Script):
         for thread in Script.worker_threads:
             thread.join()
 
+        spoofed_iteration = p.n_iter
         for worker in Script.world.workers:
             # if it fails here then that means that the response_cache global var is not being filled for some reason
             expected_images = 1
@@ -237,17 +248,25 @@ class Script(scripts.Script):
                     logger.warning(f"Worker '{worker.uuid}' had nothing")
                 continue
 
+            injected_to_iteration = 0
+            images_per_iteration = Script.world.get_current_output_size()
             # visibly add work from workers to the image gallery
             for i in range(0, len(images)):
                 image_bytes = base64.b64decode(images[i])
                 image = Image.open(io.BytesIO(image_bytes))
 
                 # inject image
-                processed_inject_image(image=image, info_index=i)
+                processed_inject_image(image=image, info_index=i, iteration=spoofed_iteration)
+
+                if injected_to_iteration >= images_per_iteration - 1:
+                    spoofed_iteration += 1
+                    injected_to_iteration = 0
+                else:
+                    injected_to_iteration += 1
 
         # generate and inject grid
-        grid = processing.images.image_grid(processed.images, len(processed.images))
-        processed_inject_image(image=grid, info_index=0, save_path_override=p.outpath_grids)
+        # grid = processing.images.image_grid(processed.images, len(processed.images))
+        # processed_inject_image(image=grid, info_index=0, save_path_override=p.outpath_grids, iteration=0, grid=True)
 
         p.batch_size = len(processed.images)
         """
@@ -347,23 +366,34 @@ class Script(scripts.Script):
         # start generating images assigned to remote machines
         sync = False  # should only really to sync once per job
         Script.world.optimize_jobs(payload)  # optimize work assignment before dispatching
+        started_jobs = []
         for job in Script.world.jobs:
+            payload_temp = copy.deepcopy(payload)
+
+            if job.worker.master:
+                started_jobs.append(job)
             if job.batch_size < 1 or job.worker.master:
                 continue
 
-            payload['batch_size'] = job.batch_size
-            payload['subseed'] += 1 * p.n_iter
-            payload['seed'] += (1 * p.n_iter) if payload['subseed_strength'] == 0 else 0
+            prior_images = 0
+            for j in started_jobs:
+                prior_images += j.batch_size * p.n_iter
+
+            payload_temp['batch_size'] = job.batch_size
+            payload_temp['subseed'] += prior_images
+            payload_temp['seed'] += prior_images if payload_temp['subseed_strength'] == 0 else 0
+            logger.debug(f"{job.worker.uuid}' job given starting seed is {payload_temp['seed']} with {prior_images} coming before it")
 
             if job.worker.loaded_model != name or job.worker.loaded_vae != vae:
                 sync = True
                 job.worker.loaded_model = name
                 job.worker.loaded_vae = vae
 
-            t = Thread(target=job.worker.request, args=(payload, option_payload, sync, ))
+            t = Thread(target=job.worker.request, args=(payload_temp, option_payload, sync, ))
 
             t.start()
             Script.worker_threads.append(t)
+            started_jobs.append(job)
 
         # if master batch size was changed again due to optimization change it to the updated value
         p.batch_size = Script.world.get_master_batch_size()

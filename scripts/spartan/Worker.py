@@ -296,7 +296,7 @@ class Worker:
 
             if self.benchmarked:
                 eta = self.batch_eta(payload=payload)
-                logger.info(f"worker '{self.uuid}' predicts it will take {eta:.3f}s to generate {payload['batch_size']} image("
+                logger.debug(f"worker '{self.uuid}' predicts it will take {eta:.3f}s to generate {payload['batch_size']} image("
                       f"s) at a speed of {self.avg_ipm} ipm\n")
 
             try:
