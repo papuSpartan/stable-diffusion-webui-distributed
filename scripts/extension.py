@@ -193,7 +193,7 @@ class Script(scripts.Script):
             if p.n_iter > 1:  # if splitting by batch count
                 num_remote_images *= p.n_iter - 1
             total_images = num_remote_images + images_per_batch
-            info_text_used_seed_index = info_index + p.n_iter * p.batch_size
+            info_text_used_seed_index = info_index + p.n_iter * p.batch_size if not grid else 0
 
             if iteration != 0:
                 logger.debug(f"iteration {iteration}/{p.n_iter}, image {true_image_pos + 1}/{total_images}, info-index: {info_index}, used seed index {info_text_used_seed_index}")
@@ -204,9 +204,8 @@ class Script(scripts.Script):
                 all_seeds=processed.all_seeds,
                 all_subseeds=processed.all_subseeds,
                 # comments=[""], # unimplemented upstream :(
-                # we don't need the "true_image_pos" like below with save_image because this method does it for us
-                position_in_batch=true_image_pos,
-                iteration=0  # if batch count is 2 p.n_iter will be 2
+                position_in_batch=true_image_pos if not grid else 0,
+                iteration=0
             )
             processed.infotexts.append(info_text)
 
@@ -265,8 +264,9 @@ class Script(scripts.Script):
                     injected_to_iteration += 1
 
         # generate and inject grid
-        # grid = processing.images.image_grid(processed.images, len(processed.images))
-        # processed_inject_image(image=grid, info_index=0, save_path_override=p.outpath_grids, iteration=0, grid=True)
+        if opts.return_grid:
+            grid = processing.images.image_grid(processed.images, len(processed.images))
+            processed_inject_image(image=grid, info_index=0, save_path_override=p.outpath_grids, iteration=spoofed_iteration, grid=True)
 
         p.batch_size = len(processed.images)
         """
