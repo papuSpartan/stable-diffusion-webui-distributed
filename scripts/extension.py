@@ -33,7 +33,6 @@ from modules.processing import fix_seed
 
 # noinspection PyMissingOrEmptyDocstring
 class Script(scripts.Script):
-    response_cache: json = None
     worker_threads: List[Thread] = []
     # Whether to verify worker certificates. Can be useful if your remotes are self-signed.
     verify_remotes = False if cmd_opts.distributed_skip_verify_remotes else True
@@ -231,7 +230,7 @@ class Script(scripts.Script):
 
         spoofed_iteration = p.n_iter
         for worker in Script.world.workers:
-            # if it fails here then that means that the response_cache global var is not being filled for some reason
+
             expected_images = 1
             for job in Script.world.jobs:
                 if job.worker == worker:
@@ -262,6 +261,7 @@ class Script(scripts.Script):
                     injected_to_iteration = 0
                 else:
                     injected_to_iteration += 1
+            worker.response = None
 
         # generate and inject grid
         if opts.return_grid:
@@ -269,14 +269,6 @@ class Script(scripts.Script):
             processed_inject_image(image=grid, info_index=0, save_path_override=p.outpath_grids, iteration=spoofed_iteration, grid=True)
 
         p.batch_size = len(processed.images)
-        """
-        This ensures that we don't get redundant outputs in a certain case: 
-        We have 3 workers and we get 3 responses back.
-        The user requests another 3, but due to job optimization one of the workers does not produce anything new.
-        If we don't empty the response, the user will get back the two images they requested, but also one from before.
-        """
-        worker.response = None
-
         return
 
     @staticmethod
