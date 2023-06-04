@@ -166,9 +166,9 @@ class Script(scripts.Script):
     def add_to_gallery(processed, p):
         """adds generated images to the image gallery after waiting for all workers to finish"""
 
-        def processed_inject_image(image, info_index, iteration: int, save_path_override=None, grid=False):
-            image_params: json = worker.response["parameters"]
-            image_info_post: json = json.loads(worker.response["info"])  # image info known after processing
+        def processed_inject_image(image, info_index, iteration: int, save_path_override=None, grid=False, response=None):
+            image_params: json = response["parameters"]
+            image_info_post: json = json.loads(response["info"])  # image info known after processing
 
             try:
                 # some metadata
@@ -227,6 +227,8 @@ class Script(scripts.Script):
         for thread in Script.worker_threads:
             thread.join()
 
+        # some worker which we know has a good response that we can use for generating the grid
+        donor_worker = None
         spoofed_iteration = p.n_iter
         for worker in Script.world.workers:
 
@@ -240,6 +242,9 @@ class Script(scripts.Script):
                 # if we for some reason get more than we asked for
                 if expected_images < len(images):
                     logger.debug(f"Requested {expected_images} images from '{worker.uuid}', got {len(images)}")
+
+                if donor_worker is None:
+                    donor_worker = worker
             except Exception:
                 if worker.master is False:
                     logger.warning(f"Worker '{worker.uuid}' had nothing")
@@ -253,7 +258,7 @@ class Script(scripts.Script):
                 image = Image.open(io.BytesIO(image_bytes))
 
                 # inject image
-                processed_inject_image(image=image, info_index=i, iteration=spoofed_iteration)
+                processed_inject_image(image=image, info_index=i, iteration=spoofed_iteration, response=worker.response)
 
                 if injected_to_iteration >= images_per_iteration - 1:
                     spoofed_iteration += 1
@@ -264,7 +269,14 @@ class Script(scripts.Script):
         # generate and inject grid
         if opts.return_grid:
             grid = processing.images.image_grid(processed.images, len(processed.images))
-            processed_inject_image(image=grid, info_index=0, save_path_override=p.outpath_grids, iteration=spoofed_iteration, grid=True)
+            processed_inject_image(
+                image=grid,
+                info_index=0,
+                save_path_override=p.outpath_grids,
+                iteration=spoofed_iteration,
+                grid=True,
+                response=donor_worker.response
+            )
 
         # cleanup after we're doing using all the responses
         for worker in Script.world.workers:
