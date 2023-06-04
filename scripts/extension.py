@@ -191,11 +191,10 @@ class Script(scripts.Script):
             num_remote_images = images_per_batch * p.batch_size
             if p.n_iter > 1:  # if splitting by batch count
                 num_remote_images *= p.n_iter - 1
-            total_images = num_remote_images + images_per_batch
             info_text_used_seed_index = info_index + p.n_iter * p.batch_size if not grid else 0
 
             if iteration != 0:
-                logger.debug(f"iteration {iteration}/{p.n_iter}, image {true_image_pos + 1}/{total_images}, info-index: {info_index}, used seed index {info_text_used_seed_index}")
+                logger.debug(f"iteration {iteration}/{p.n_iter}, image {true_image_pos + 1}/{Script.world.total_batch_size * p.n_iter}, info-index: {info_index}, used seed index {info_text_used_seed_index}")
 
             info_text = processing.create_infotext(
                 p=p,
@@ -234,7 +233,7 @@ class Script(scripts.Script):
             expected_images = 1
             for job in Script.world.jobs:
                 if job.worker == worker:
-                    expected_images = job.batch_size
+                    expected_images = job.batch_size * p.n_iter
 
             try:
                 images: json = worker.response["images"]
@@ -261,12 +260,15 @@ class Script(scripts.Script):
                     injected_to_iteration = 0
                 else:
                     injected_to_iteration += 1
-            worker.response = None
 
         # generate and inject grid
         if opts.return_grid:
             grid = processing.images.image_grid(processed.images, len(processed.images))
             processed_inject_image(image=grid, info_index=0, save_path_override=p.outpath_grids, iteration=spoofed_iteration, grid=True)
+
+        # cleanup after we're doing using all the responses
+        for worker in Script.world.workers:
+            worker.response = None
 
         p.batch_size = len(processed.images)
         return

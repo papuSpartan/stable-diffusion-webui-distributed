@@ -117,7 +117,6 @@ class World:
         quotient, remainder = divmod(self.total_batch_size, self.get_world_size())
         chosen = quotient if quotient > remainder else remainder
         per_worker_batch_size = math.ceil(chosen)
-        logger.debug(f"default per-node batch-size is {per_worker_batch_size}")
 
         return per_worker_batch_size
 
@@ -452,7 +451,6 @@ class World:
         # if the total number of requested images is not cleanly divisible by the world size then we tack that on here
         # *if that hasn't already been filled by complementary fill or the requirement that master's batch size be >= 1
         remainder_images = self.total_batch_size - self.get_current_output_size()
-        logger.debug(f"{remainder_images} = {self.total_batch_size} - {self.get_current_output_size()}")
         if remainder_images >= 1:
             logger.debug(f"The requested number of images({self.total_batch_size}) was not cleanly divisible by the number of realtime nodes({len(self.realtime_jobs())}) and complementary jobs did not provide this missing image.")
 
@@ -465,9 +463,10 @@ class World:
                     laziest_realtime_job = job
 
             laziest_realtime_job.batch_size += remainder_images
-            logger.debug(f"dispatched remainder image to worker '{laziest_realtime_job.worker.uuid}'")
 
         logger.info("Job distribution:")
+        iterations = payload['n_iter']
+        logger.info(f"{iterations} iteration(s)")
         for job in self.jobs:
-            logger.info(f"worker '{job.worker.uuid}' - {job.batch_size} images")
+            logger.info(f"worker '{job.worker.uuid}' - {job.batch_size * iterations} images")
         print()

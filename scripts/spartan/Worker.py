@@ -295,7 +295,7 @@ class Worker:
                 #  second GET to see if everything loaded...
 
             if self.benchmarked:
-                eta = self.batch_eta(payload=payload)
+                eta = self.batch_eta(payload=payload) * payload['n_iter']
                 logger.debug(f"worker '{self.uuid}' predicts it will take {eta:.3f}s to generate {payload['batch_size']} image("
                       f"s) at a speed of {self.avg_ipm} ipm\n")
 
@@ -360,6 +360,7 @@ class Worker:
                 self.response = response.json()
                 if response.status_code != 200:
                     logger.error(f"'{self.uuid}' response: Code <{response.status_code}> {str(response.content, 'utf-8')}")
+                    self.response = None
                     raise InvalidWorkerResponse()
 
                 # update list of ETA accuracy if state is valid
