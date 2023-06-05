@@ -114,11 +114,7 @@ class World:
         """the amount of images/total images requested that a worker would compute if conditions were perfect and
         each worker generated at the same speed"""
 
-        quotient, remainder = divmod(self.total_batch_size, self.get_world_size())
-        chosen = quotient if quotient > remainder else remainder
-        per_worker_batch_size = math.ceil(chosen)
-
-        return per_worker_batch_size
+        return self.total_batch_size // self.get_world_size()
 
     def get_world_size(self) -> int:
         """
@@ -452,21 +448,21 @@ class World:
         # *if that hasn't already been filled by complementary fill or the requirement that master's batch size be >= 1
         remainder_images = self.total_batch_size - self.get_current_output_size()
         if remainder_images >= 1:
-            logger.debug(f"The requested number of images({self.total_batch_size}) was not cleanly divisible by the number of realtime nodes({len(self.realtime_jobs())}) and complementary jobs did not provide this missing image.")
+            logger.debug(f"The requested number of images({self.total_batch_size}) was not cleanly divisible by the number of realtime nodes({len(self.realtime_jobs())}) resulting in {remainder_images} that will be redistributed")
 
-            # Gets the fastest job that has been assigned the least amount of images
-            laziest_realtime_job = None
-            for job in self.realtime_jobs():
-                if laziest_realtime_job is None:
-                    laziest_realtime_job = job
-                elif laziest_realtime_job.batch_size > job.batch_size:
-                    laziest_realtime_job = job
-
-            laziest_realtime_job.batch_size += remainder_images
+            realtime_jobs = self.realtime_jobs()
+            realtime_jobs.sort(key=lambda x: x.batch_size)
+            # round-robin distribute the remaining images
+            while remainder_images >= 1:
+                for job in realtime_jobs:
+                    if remainder_images < 1:
+                        break
+                    job.batch_size += 1
+                    remainder_images -= 1
 
         logger.info("Job distribution:")
         iterations = payload['n_iter']
-        logger.info(f"{iterations} iteration(s)")
+        logger.info(f"{self.total_batch_size} * {iterations} iteration(s): {self.total_batch_size * iterations} images")
         for job in self.jobs:
             logger.info(f"worker '{job.worker.uuid}' - {job.batch_size * iterations} images")
         print()

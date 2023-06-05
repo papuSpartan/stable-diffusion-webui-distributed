@@ -4,7 +4,7 @@ from modules.shared import cmd_opts
 
 log_level = 'DEBUG' if cmd_opts.distributed_debug else 'INFO'
 logger = logging.getLogger("rich")
-logger.addHandler(RichHandler(rich_tracebacks=True, markup=True))
+logger.addHandler(RichHandler(rich_tracebacks=True, markup=True, show_time=False))
 logger.setLevel(log_level)
 
 warmup_samples = 2  # number of samples to do before recording a valid benchmark sample

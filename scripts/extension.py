@@ -388,7 +388,7 @@ class Script(scripts.Script):
             payload_temp['batch_size'] = job.batch_size
             payload_temp['subseed'] += prior_images
             payload_temp['seed'] += prior_images if payload_temp['subseed_strength'] == 0 else 0
-            logger.debug(f"{job.worker.uuid}' job given starting seed is {payload_temp['seed']} with {prior_images} coming before it")
+            logger.debug(f"'{job.worker.uuid}' job's given starting seed is {payload_temp['seed']} with {prior_images} coming before it")
 
             if job.worker.loaded_model != name or job.worker.loaded_vae != vae:
                 sync = True
