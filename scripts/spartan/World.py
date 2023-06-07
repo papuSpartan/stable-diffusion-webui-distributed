@@ -14,14 +14,11 @@ from threading import Thread
 from inspect import getsourcefile
 from os.path import abspath
 from pathlib import Path
-import math
 from modules.processing import process_images, StableDiffusionProcessingTxt2Img
 # from modules.shared import cmd_opts
 import modules.shared as shared
 from scripts.spartan.Worker import Worker
-from scripts.spartan.shared import benchmark_payload, logger, warmup_samples
-# from modules.errors import display
-import gradio as gr
+from scripts.spartan.shared import logger, warmup_samples
 
 
 class NotBenchmarked(Exception):
@@ -173,7 +170,6 @@ class World:
         self.workers.append(worker)
 
     def interrupt_remotes(self):
-        threads: List[Thread] = []
 
         for worker in self.workers:
             if worker.master:

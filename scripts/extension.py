@@ -6,10 +6,12 @@ import base64
 import io
 import json
 import re
+import threading
+
 import gradio
 from modules import scripts
 from modules import processing
-from threading import Thread
+from threading import Thread, current_thread
 from PIL import Image
 from typing import List
 import urllib3
@@ -225,7 +227,10 @@ class Script(scripts.Script):
 
         # wait for response from all workers
         for thread in Script.worker_threads:
+            logger.debug(f"waiting for worker thread '{thread.name}'")
             thread.join()
+        Script.worker_threads.clear()
+        logger.debug("all worker request threads returned")
 
         # some worker which we know has a good response that we can use for generating the grid
         donor_worker = None
@@ -312,6 +317,8 @@ class Script(scripts.Script):
             Script.world.update_world(total_batch_size=batch_size)
 
     def run(self, p, *args):
+        current_thread().name = "distributed_main"
+
         if cmd_opts.distributed_remotes is None:
             raise RuntimeError("Distributed - No remotes passed. (Try using `--distributed-remotes`?)")
 
@@ -395,7 +402,7 @@ class Script(scripts.Script):
                 job.worker.loaded_model = name
                 job.worker.loaded_vae = vae
 
-            t = Thread(target=job.worker.request, args=(payload_temp, option_payload, sync, ))
+            t = Thread(target=job.worker.request, args=(payload_temp, option_payload, sync, ), name=f"{job.worker.uuid}_request")
 
             t.start()
             Script.worker_threads.append(t)

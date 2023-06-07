@@ -427,7 +427,7 @@ class Worker:
         # TODO look into how and why this "warmup" happens
         self.state = State.WORKING
         for i in range(0, samples + warmup_samples):  # run some extra times so that the remote can "warm up"
-            t = Thread(target=self.request, name=self.uuid, args=(benchmark_payload, None, False,))
+            t = Thread(target=self.request, args=(benchmark_payload, None, False,), name=f"{self.uuid}_benchmark)")
             try:  # if the worker is unreachable/offline then handle that here
                 t.start()
                 start = time.time()
