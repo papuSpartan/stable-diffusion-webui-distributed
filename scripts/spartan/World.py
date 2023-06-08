@@ -198,6 +198,11 @@ class World:
         unbenched_workers = []
         benchmark_threads = []
 
+        def benchmark_wrapped(worker):
+            bench_func = worker.benchmark if not worker.master else self.benchmark_master
+            worker.avg_ipm = bench_func()
+            worker.benchmarked = True
+
         if rebenchmark:
             saved = False
             for worker in self.workers:
@@ -206,49 +211,48 @@ class World:
 
         if saved:
             with open(self.worker_info_path, 'r') as worker_info_file:
-                workers_info = json.load(worker_info_file)
-
-        def benchmark_wrapped(worker):
-            bench_func = worker.benchmark if not worker.master else self.benchmark_master
-            worker.avg_ipm = bench_func()
-            worker.benchmarked = True
+                try:
+                    workers_info = json.load(worker_info_file)
+                except json.JSONDecodeError:
+                    logger.error(f"workers.json is not valid JSON, regenerating")
+                    rebenchmark = True
+                    unbenched_workers = self.workers
 
         # load stats for any workers that have already been benched
         if saved and not rebenchmark:
-            logger.debug(f"loaded saved worker configuration: \n{workers_info}")
+            logger.debug(f"loaded saved configuration: \n{workers_info}")
 
             for worker in self.workers:
-                if not worker.benchmarked or rebenchmark:
-                    unbenched_workers.append(worker)
-                    continue
-
                 try:
                     worker.avg_ipm = workers_info[worker.uuid]['avg_ipm']
                     worker.benchmarked = True
                 except KeyError:
-                    logger.debug(f"information for worker '{worker.uuid}' was not found in workers.json")
-        workers_info.update({'benchmark_payload': benchmark_payload})
+                    logger.debug(f"worker '{worker.uuid}' not found in workers.json")
+                    unbenched_workers.append(worker)
+            return
+        else:
+            unbenched_workers = self.workers
 
         # benchmark those that haven't been
         for worker in unbenched_workers:
-            logger.debug(f"worker {worker.uuid} {worker.avg_ipm}")
-
             t = Thread(target=benchmark_wrapped, args=(worker, ), name=f"{worker.uuid}_benchmark")
             benchmark_threads.append(t)
             t.start()
 
         # wait for all benchmarks to finish and update stats on newly benchmarked workers
         if len(benchmark_threads) > 0:
-            for t in benchmark_threads:
-                t.join()
-            logger.info("Benchmarking finished")
+            with open(self.worker_info_path, 'w') as worker_info_file:
+                for t in benchmark_threads:
+                    t.join()
+                logger.info("Benchmarking finished")
 
-            for worker in unbenched_workers:
-                workers_info.update(worker.info())
+                for worker in unbenched_workers:
+                    workers_info.update(worker.info())
+                workers_info.update({'benchmark_payload': benchmark_payload})
 
-        # save benchmark results to workers.json
-        with open(self.worker_info_path, 'w') as worker_info_file:
-            json.dump(workers_info, worker_info_file, indent=3)
+                # save benchmark results to workers.json
+                json.dump(workers_info, worker_info_file, indent=3)
+
 
     def get_current_output_size(self) -> int:
         """

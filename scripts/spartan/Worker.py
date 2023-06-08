@@ -446,7 +446,7 @@ class Worker:
                       f"minute\n")
                 results.append(sample_ipm)
             elif i == warmup_samples - 1:
-                logger.info(f"{self.uuid} warming up\n")
+                logger.info(f"{self.uuid} finished warming up\n")
 
         # average the sample results for accuracy
         ipm_sum = 0
