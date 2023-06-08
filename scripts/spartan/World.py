@@ -238,6 +238,7 @@ class World:
             t = Thread(target=benchmark_wrapped, args=(worker, ), name=f"{worker.uuid}_benchmark")
             benchmark_threads.append(t)
             t.start()
+            logger.info(f"benchmarking worker '{worker.uuid}'")
 
         # wait for all benchmarks to finish and update stats on newly benchmarked workers
         if len(benchmark_threads) > 0:
@@ -253,6 +254,8 @@ class World:
                 # save benchmark results to workers.json
                 json.dump(workers_info, worker_info_file, indent=3)
 
+        logger.info(self.speed_summary())
+
 
     def get_current_output_size(self) -> int:
         """
@@ -266,19 +269,25 @@ class World:
 
         return num_images
 
-    # TODO broken
-    def print_speed_stats(self):
+    def speed_summary(self) -> str:
         """
-        Prints workers by their ipm in descending order.
+        Returns string listing workers by their ipm in descending order.
         """
         workers_copy = copy.deepcopy(self.workers)
+        workers_copy.sort(key=lambda w: w.avg_ipm, reverse=True)
+
+        total_ipm = 0
+        for worker in workers_copy:
+            total_ipm += worker.avg_ipm
 
         i = 1
-        workers_copy.sort(key=lambda w: w.avg_ipm, reverse=True)
-        print("Worker speed hierarchy:")
+        output = "World composition:\n"
         for worker in workers_copy:
-            print(f"{i}.    worker '{worker}' - {worker.avg_ipm} ipm")
+            output += f"{i}. '{worker.uuid}'({worker}) - {worker.avg_ipm:.2f} ipm\n"
             i += 1
+        output += f"total: ~{total_ipm:.2f} ipm"
+
+        return output
 
     def __str__(self):
         # print status of all jobs

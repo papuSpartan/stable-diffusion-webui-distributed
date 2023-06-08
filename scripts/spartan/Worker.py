@@ -409,8 +409,6 @@ class Worker:
         if self.master is True:
             return -1
 
-        logger.info(f"benchmarking worker '{self.uuid}'")
-
         def ipm(seconds: float) -> float:
             """
             Determines the rate of images per minute.
@@ -446,7 +444,7 @@ class Worker:
                       f"minute\n")
                 results.append(sample_ipm)
             elif i == warmup_samples - 1:
-                logger.info(f"{self.uuid} finished warming up\n")
+                logger.debug(f"{self.uuid} finished warming up\n")
 
         # average the sample results for accuracy
         ipm_sum = 0
@@ -454,7 +452,7 @@ class Worker:
             ipm_sum += ipm
         avg_ipm = math.floor(ipm_sum / samples)
 
-        logger.info(f"Worker '{self.uuid}' average ipm: {avg_ipm}")
+        logger.debug(f"Worker '{self.uuid}' average ipm: {avg_ipm}")
         self.avg_ipm = avg_ipm
         # noinspection PyTypeChecker
         self.response = None
