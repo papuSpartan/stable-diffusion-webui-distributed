@@ -80,9 +80,9 @@ class Script(scripts.Script):
                     refresh_checkpoints_btn.style(full_width=False)
                     refresh_checkpoints_btn.click(Script.ui_connect_refresh_ckpts_btn, inputs=[], outputs=[])
 
-                    sync_models_btn = gradio.Button(value='Synchronize models')
-                    sync_models_btn.style(full_width=False)
-                    sync_models_btn.click(Script.user_sync_script, inputs=[], outputs=[])
+                    run_usr_btn = gradio.Button(value='Run user script')
+                    run_usr_btn.style(full_width=False)
+                    run_usr_btn.click(Script.user_script, inputs=[], outputs=[])
 
                     interrupt_all_btn = gradio.Button(value='Interrupt all', variant='stop')
                     interrupt_all_btn.style(full_width=False)
@@ -109,7 +109,7 @@ class Script(scripts.Script):
         Script.world.benchmark(rebenchmark=True)
 
     @staticmethod
-    def user_sync_script():
+    def user_script():
         user_scripts = Path(os.path.abspath(__file__)).parent.joinpath('user')
 
         for file in user_scripts.iterdir():
