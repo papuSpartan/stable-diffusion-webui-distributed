@@ -121,7 +121,7 @@ class Worker:
     def __str__(self):
         return f"{self.address}:{self.port}"
 
-    def info(self, benchmark_payload) -> dict:
+    def info(self) -> dict:
         """
          Stores the payload used to benchmark the world and certain attributes of the worker.
          These things are used to draw certain conclusions after the first session.
@@ -137,7 +137,6 @@ class Worker:
         data = {
             "avg_ipm": self.avg_ipm,
             "master": self.master,
-            "benchmark_payload": benchmark_payload
         }
 
         d[self.uuid] = data
@@ -407,7 +406,10 @@ class Worker:
         t: Thread
         samples = 2  # number of times to benchmark the remote / accuracy
 
-        logger.info(f"Benchmarking worker '{self.uuid}':\n")
+        if self.master is True:
+            return -1
+
+        logger.info(f"benchmarking worker '{self.uuid}'")
 
         def ipm(seconds: float) -> float:
             """
@@ -424,10 +426,10 @@ class Worker:
 
         results: List[float] = []
         # it's seems to be lower for the first couple of generations
-        # TODO look into how and why this "warmup" happens
+        # this is due to something torch does at startup according to auto and is now done at sdwui startup
         self.state = State.WORKING
         for i in range(0, samples + warmup_samples):  # run some extra times so that the remote can "warm up"
-            t = Thread(target=self.request, args=(benchmark_payload, None, False,), name=f"{self.uuid}_benchmark)")
+            t = Thread(target=self.request, args=(benchmark_payload, None, False,), name=f"{self.uuid}_benchmark_request")
             try:  # if the worker is unreachable/offline then handle that here
                 t.start()
                 start = time.time()

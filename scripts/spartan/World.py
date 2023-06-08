@@ -15,10 +15,9 @@ from inspect import getsourcefile
 from os.path import abspath
 from pathlib import Path
 from modules.processing import process_images, StableDiffusionProcessingTxt2Img
-# from modules.shared import cmd_opts
 import modules.shared as shared
 from scripts.spartan.Worker import Worker
-from scripts.spartan.shared import logger, warmup_samples
+from scripts.spartan.shared import logger, warmup_samples, benchmark_payload
 
 
 class NotBenchmarked(Exception):
@@ -196,37 +195,58 @@ class World:
 
         workers_info: dict = {}
         saved: bool = os.path.exists(self.worker_info_path)
-        benchmark_payload_loaded: bool = False
+        unbenched_workers = []
+        benchmark_threads = []
 
         if rebenchmark:
             saved = False
             for worker in self.workers:
                 worker.benchmarked = False
+            unbenched_workers = self.workers
 
         if saved:
             with open(self.worker_info_path, 'r') as worker_info_file:
                 workers_info = json.load(worker_info_file)
 
-        # benchmark all nodes
-        for worker in self.workers:
+        def benchmark_wrapped(worker):
+            bench_func = worker.benchmark if not worker.master else self.benchmark_master
+            worker.avg_ipm = bench_func()
+            worker.benchmarked = True
 
-            if not saved:
-                if worker.master:
-                    self.master().avg_ipm = self.benchmark_master()
-                    workers_info.update(self.master().info(benchmark_payload=benchmark_payload))
-                else:
-                    worker.benchmark()
-            else:
-                if not benchmark_payload_loaded:
-                    benchmark_payload = workers_info[worker.uuid]['benchmark_payload']
-                    benchmark_payload_loaded = True
+        # load stats for any workers that have already been benched
+        if saved and not rebenchmark:
+            logger.debug(f"loaded saved worker configuration: \n{workers_info}")
 
-                    logger.debug(f"loaded saved worker configuration: \n{workers_info}")
-                worker.avg_ipm = workers_info[worker.uuid]['avg_ipm']
-                worker.benchmarked = True
+            for worker in self.workers:
+                if not worker.benchmarked or rebenchmark:
+                    unbenched_workers.append(worker)
+                    continue
 
-            workers_info.update(worker.info(benchmark_payload=benchmark_payload))
+                try:
+                    worker.avg_ipm = workers_info[worker.uuid]['avg_ipm']
+                    worker.benchmarked = True
+                except KeyError:
+                    logger.debug(f"information for worker '{worker.uuid}' was not found in workers.json")
+        workers_info.update({'benchmark_payload': benchmark_payload})
 
+        # benchmark those that haven't been
+        for worker in unbenched_workers:
+            logger.debug(f"worker {worker.uuid} {worker.avg_ipm}")
+
+            t = Thread(target=benchmark_wrapped, args=(worker, ), name=f"{worker.uuid}_benchmark")
+            benchmark_threads.append(t)
+            t.start()
+
+        # wait for all benchmarks to finish and update stats on newly benchmarked workers
+        if len(benchmark_threads) > 0:
+            for t in benchmark_threads:
+                t.join()
+            logger.info("Benchmarking finished")
+
+            for worker in unbenched_workers:
+                workers_info.update(worker.info())
+
+        # save benchmark results to workers.json
         with open(self.worker_info_path, 'w') as worker_info_file:
             json.dump(workers_info, worker_info_file, indent=3)
 
@@ -274,6 +294,9 @@ class World:
         fast_jobs: List[Job] = []
 
         for job in self.jobs:
+            if job.worker.benchmarked is False or job.worker.avg_ipm is None:
+                continue
+
             if job.complementary is False:
                 fast_jobs.append(job)
 
@@ -314,7 +337,6 @@ class World:
 
         return lag
 
-    # TODO account for generation "warm-up" lag
     def benchmark_master(self) -> float:
         """
         Benchmarks the local/master worker.
@@ -322,7 +344,6 @@ class World:
         Returns:
             float: Local worker speed in ipm
         """
-        global benchmark_payload
 
         # wrap our benchmark payload
         master_bench_payload = StableDiffusionProcessingTxt2Img()
@@ -331,8 +352,6 @@ class World:
         # Keeps from trying to save the images when we don't know the path. Also, there's not really any reason to.
         master_bench_payload.do_not_save_samples = True
 
-        # make it seem as though this never happened
-        state_cache = copy.deepcopy(shared.state)
         # "warm up" due to initial generation lag
         for i in range(warmup_samples):
             process_images(master_bench_payload)
@@ -341,7 +360,6 @@ class World:
         start = time.time()
         process_images(master_bench_payload)
         elapsed = time.time() - start
-        shared.state = state_cache
 
         ipm = benchmark_payload['batch_size'] / (elapsed / 60)
 
