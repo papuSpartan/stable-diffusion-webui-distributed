@@ -16,7 +16,7 @@ from os.path import abspath
 from pathlib import Path
 from modules.processing import process_images, StableDiffusionProcessingTxt2Img
 import modules.shared as shared
-from scripts.spartan.Worker import Worker
+from scripts.spartan.Worker import Worker, State
 from scripts.spartan.shared import logger, warmup_samples, benchmark_payload
 
 
@@ -74,7 +74,7 @@ class World:
     def __init__(self, initial_payload, verify_remotes: bool = True):
         master_worker = Worker(master=True)
         self.total_batch_size: int = 0
-        self.workers: List[Worker] = [master_worker]
+        self.__workers: List[Worker] = [master_worker]
         self.jobs: List[Job] = []
         self.job_timeout: int = 6  # seconds
         self.initialized: bool = False
@@ -109,14 +109,14 @@ class World:
         """the amount of images/total images requested that a worker would compute if conditions were perfect and
         each worker generated at the same speed"""
 
-        return self.total_batch_size // self.get_world_size()
+        return self.total_batch_size // self.world_size()
 
-    def get_world_size(self) -> int:
+    def world_size(self) -> int:
         """
         Returns:
             int: The number of nodes currently registered in the world.
         """
-        return len(self.workers)
+        return len(self.get_workers())
 
     def sync_master(self, batch_size: int):
         """
@@ -124,7 +124,7 @@ class World:
         """
 
         if len(self.jobs) < 1:
-            master_job = Job(worker=self.workers[0], batch_size=batch_size)
+            master_job = Job(worker=self.master(), batch_size=batch_size)
             self.jobs.append(master_job)
         else:
             self.master_job().batch_size = batch_size
@@ -143,7 +143,12 @@ class World:
             Worker: The local/master worker object.
         """
 
-        return self.workers[0]
+        workers = self.get_workers()
+        master = workers[0]
+        if master.master is False:
+            raise RuntimeError("Master should be the first worker in the list")
+
+        return master
 
     def master_job(self) -> Job:
         """
@@ -165,11 +170,11 @@ class World:
         """
 
         worker = Worker(uuid=uuid, address=address, port=port, verify_remotes=self.verify_remotes)
-        self.workers.append(worker)
+        self.__workers.append(worker)
 
     def interrupt_remotes(self):
 
-        for worker in self.workers:
+        for worker in self.get_workers():
             if worker.master:
                 continue
 
@@ -177,7 +182,7 @@ class World:
             t.start()
 
     def refresh_checkpoints(self):
-        for worker in self.workers:
+        for worker in self.get_workers():
             if worker.master:
                 continue
 
@@ -202,9 +207,11 @@ class World:
 
         if rebenchmark:
             saved = False
-            for worker in self.workers:
+            workers = self.get_workers()
+
+            for worker in workers:
                 worker.benchmarked = False
-            unbenched_workers = self.workers
+            unbenched_workers = workers
 
         if saved:
             with open(self.worker_info_path, 'r') as worker_info_file:
@@ -213,13 +220,13 @@ class World:
                 except json.JSONDecodeError:
                     logger.error(f"workers.json is not valid JSON, regenerating")
                     rebenchmark = True
-                    unbenched_workers = self.workers
+                    unbenched_workers = self.get_workers()
 
         # load stats for any workers that have already been benched
         if saved and not rebenchmark:
             logger.debug(f"loaded saved configuration: \n{workers_info}")
 
-            for worker in self.workers:
+            for worker in self.get_workers():
                 try:
                     worker.avg_ipm = workers_info[worker.uuid]['avg_ipm']
                     worker.benchmarked = True
@@ -228,7 +235,7 @@ class World:
                     unbenched_workers.append(worker)
             return
         else:
-            unbenched_workers = self.workers
+            unbenched_workers = self.get_workers()
 
         # benchmark those that haven't been
         for worker in unbenched_workers:
@@ -270,7 +277,7 @@ class World:
         """
         Returns string listing workers by their ipm in descending order.
         """
-        workers_copy = copy.deepcopy(self.workers)
+        workers_copy = copy.deepcopy(self.__workers)
         workers_copy.sort(key=lambda w: w.avg_ipm, reverse=True)
 
         total_ipm = 0
@@ -386,13 +393,22 @@ class World:
             master_job = self.jobs[0]
             self.jobs = [master_job]
 
-        for worker in self.workers:
+        for worker in self.get_workers():
             if worker.master:
                 self.master_job().batch_size = default_job_size
                 continue
 
             batch_size = default_job_size
             self.jobs.append(Job(worker=worker, batch_size=batch_size))
+
+    def get_workers(self):
+        filtered = []
+        for worker in self.__workers:
+            if worker.state != State.UNAVAILABLE:
+                filtered.append(worker)
+
+        return filtered
+
 
     def optimize_jobs(self, payload: json):
         """

@@ -29,6 +29,7 @@ class State(Enum):
     IDLE = 1
     WORKING = 2
     INTERRUPTED = 3
+    UNAVAILABLE = 4
 
 
 class Worker:
@@ -254,7 +255,6 @@ class Worker:
         except Exception as e:
             raise e
 
-    # TODO implement hard timeout which is independent of the requests library
     def request(self, payload: dict, option_payload: dict, sync_options: bool):
         """
         Sends an arbitrary amount of requests to a sdwui api depending on the context.
@@ -391,8 +391,9 @@ class Worker:
                 else:
                     raise InvalidWorkerResponse(e)
 
-        except requests.exceptions.ConnectTimeout:
-            logger.error(f"\nTimed out waiting for worker '{self.uuid}' at {self}")
+        except requests.exceptions.ConnectionError:
+            self.mark_unreachable()
+            return
 
         self.state = State.IDLE
         return
@@ -427,6 +428,10 @@ class Worker:
         # this is due to something torch does at startup according to auto and is now done at sdwui startup
         self.state = State.WORKING
         for i in range(0, samples + warmup_samples):  # run some extra times so that the remote can "warm up"
+            if self.state == State.UNAVAILABLE:
+                self.response = None
+                return 0
+
             t = Thread(target=self.request, args=(benchmark_payload, None, False,), name=f"{self.uuid}_benchmark_request")
             try:  # if the worker is unreachable/offline then handle that here
                 t.start()
@@ -435,9 +440,7 @@ class Worker:
                 elapsed = time.time() - start
                 sample_ipm = ipm(elapsed)
             except InvalidWorkerResponse as e:
-                # TODO
-                print(e)
-                raise gr.Error(e.__str__())
+                raise e
 
             if i >= warmup_samples:
                 logger.info(f"Sample {i - warmup_samples + 1}: Worker '{self.uuid}'({self}) - {sample_ipm:.2f} image(s) per "
@@ -461,30 +464,55 @@ class Worker:
         return avg_ipm
 
     def refresh_checkpoints(self):
-        model_response = requests.post(
-            self.full_url('refresh-checkpoints'),
-            json={},
-            verify=self.verify_remotes
-        )
-        lora_response = requests.post(
-            self.full_url('refresh-loras'),
-            json={},
-            verify=self.verify_remotes
-        )
+        try:
+            model_response = requests.post(
+                self.full_url('refresh-checkpoints'),
+                json={},
+                verify=self.verify_remotes
+            )
+            lora_response = requests.post(
+                self.full_url('refresh-loras'),
+                json={},
+                verify=self.verify_remotes
+            )
 
-        if model_response.status_code != 200:
-            logger.error(f"Failed to refresh models for worker '{self.uuid}'\nCode <{model_response.status_code}>")
+            if model_response.status_code != 200:
+                logger.error(f"Failed to refresh models for worker '{self.uuid}'\nCode <{model_response.status_code}>")
 
-        if lora_response.status_code != 200:
-            logger.error(f"Failed to refresh LORA's for worker '{self.uuid}'\nCode <{lora_response.status_code}>")
+            if lora_response.status_code != 200:
+                logger.error(f"Failed to refresh LORA's for worker '{self.uuid}'\nCode <{lora_response.status_code}>")
+        except requests.exceptions.ConnectionError:
+            self.mark_unreachable()
 
     def interrupt(self):
-        response = requests.post(
-            self.full_url('interrupt'),
-            json={},
-            verify=self.verify_remotes
-        )
+        try:
+            response = requests.post(
+                self.full_url('interrupt'),
+                json={},
+                verify=self.verify_remotes
+            )
 
-        if response.status_code == 200:
-            self.state = State.INTERRUPTED
-            logger.debug(f"successfully interrupted worker {self.uuid}")
+            if response.status_code == 200:
+                self.state = State.INTERRUPTED
+                logger.debug(f"successfully interrupted worker {self.uuid}")
+        except requests.exceptions.ConnectionError:
+            self.mark_unreachable()
+
+    def reachable(self) -> bool:
+        """returns false if worker is unreachable"""
+        try:
+            response = requests.get(
+                self.full_url("memory"),
+                verify=self.verify_remotes
+            )
+            if response.status_code == 200:
+                return True
+            else:
+                return False
+
+        except requests.exceptions.ConnectionError:
+            return False
+
+    def mark_unreachable(self):
+        logger.error(f"Worker '{self.uuid}' at {self} was unreachable, will avoid in future")
+        self.state = State.UNAVAILABLE

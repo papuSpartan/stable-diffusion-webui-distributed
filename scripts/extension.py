@@ -131,7 +131,7 @@ class Script(scripts.Script):
         # some worker which we know has a good response that we can use for generating the grid
         donor_worker = None
         spoofed_iteration = p.n_iter
-        for worker in Script.world.workers:
+        for worker in Script.world.get_workers():
 
             expected_images = 1
             for job in Script.world.jobs:
@@ -180,7 +180,7 @@ class Script(scripts.Script):
             )
 
         # cleanup after we're doing using all the responses
-        for worker in Script.world.workers:
+        for worker in Script.world.get_workers():
             worker.response = None
 
         p.batch_size = len(processed.images)

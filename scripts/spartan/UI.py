@@ -48,15 +48,16 @@ class UI:
 
     def status_btn(self):
         worker_status = ''
+        workers = self.world.get_workers()
 
-        for worker in self.world.workers:
+        for worker in workers:
             if worker.master:
                 continue
 
             worker_status += f"{worker.uuid} at {worker.address} is {worker.state.name}\n"
 
         # TODO replace this with a single check to a state flag that we should make in the world class
-        for worker in self.world.workers:
+        for worker in workers:
             if worker.state == State.WORKING:
                 return self.world.__str__(), worker_status
 
