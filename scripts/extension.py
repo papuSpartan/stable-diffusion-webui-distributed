@@ -6,9 +6,6 @@ import base64
 import io
 import json
 import re
-import threading
-
-import gradio
 from modules import scripts
 from modules import processing
 from threading import Thread, current_thread
@@ -19,11 +16,8 @@ import copy
 from modules.images import save_image
 from modules.shared import cmd_opts
 import time
-from pathlib import Path
-import os
-import subprocess
-from scripts.spartan.World import World, NotBenchmarked, WorldAlreadyInitialized
-from scripts.spartan.Worker import Worker, State
+from scripts.spartan.World import World, WorldAlreadyInitialized
+from scripts.spartan.UI import UI
 from modules.shared import opts
 from scripts.spartan.shared import logger
 from scripts.spartan.control_net import pack_control_net
@@ -45,11 +39,15 @@ class Script(scripts.Script):
     first_run = True
     master_start = None
 
-    world = None
+    if verify_remotes is False:
+        logger.warning(f"You have chosen to forego the verification of worker TLS certificates")
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-    # p's type is
-    # "modules.processing.StableDiffusionProcessingTxt2Img"
-    # runs every time the generate button is hit
+    # build world
+    world = World(initial_payload=None, verify_remotes=verify_remotes)
+    # add workers to the world
+    for worker in cmd_opts.distributed_remotes:
+        world.add_worker(uuid=worker[0], address=worker[1], port=worker[2])
 
     def title(self):
         return "Distribute"
@@ -59,106 +57,8 @@ class Script(scripts.Script):
         return True
 
     def ui(self, is_img2img):
-
-        with gradio.Box():  # adds padding so our components don't look out of place
-            with gradio.Accordion(label='Distributed', open=False) as main_accordian:
-
-                with gradio.Tab('Status') as status_tab:
-                    status = gradio.Textbox(elem_id='status', show_label=False)
-                    status.placeholder = 'Refresh!'
-                    jobs = gradio.Textbox(elem_id='jobs', label='Jobs', show_label=True)
-                    jobs.placeholder = 'Refresh!'
-
-                    refresh_status_btn = gradio.Button(value='Refresh')
-                    refresh_status_btn.style(size='sm')
-                    refresh_status_btn.click(Script.ui_connect_status, inputs=[], outputs=[jobs, status])
-
-                    status_tab.select(fn=Script.ui_connect_status, inputs=[], outputs=[jobs, status])
-
-                with gradio.Tab('Utils'):
-                    refresh_checkpoints_btn = gradio.Button(value='Refresh checkpoints')
-                    refresh_checkpoints_btn.style(full_width=False)
-                    refresh_checkpoints_btn.click(Script.ui_connect_refresh_ckpts_btn, inputs=[], outputs=[])
-
-                    run_usr_btn = gradio.Button(value='Run user script')
-                    run_usr_btn.style(full_width=False)
-                    run_usr_btn.click(Script.user_script, inputs=[], outputs=[])
-
-                    interrupt_all_btn = gradio.Button(value='Interrupt all', variant='stop')
-                    interrupt_all_btn.style(full_width=False)
-                    interrupt_all_btn.click(Script.ui_connect_interrupt_btn, inputs=[], outputs=[])
-
-                    redo_benchmarks_btn = gradio.Button(value='Redo benchmarks', variant='stop')
-                    redo_benchmarks_btn.style(full_width=False)
-                    redo_benchmarks_btn.click(Script.ui_connect_benchmark_button, inputs=[], outputs=[])
-
-        return
-
-    @staticmethod
-    def ensure_init():
-        try:
-            _initialized = Script.world.initialized
-        except AttributeError:
-            logger.debug("Distributed system not initialized")
-            Script.initialize(initial_payload=None)
-
-    @staticmethod
-    def ui_connect_benchmark_button():
-        Script.ensure_init()
-        logger.info("Redoing benchmarks...")
-        Script.world.benchmark(rebenchmark=True)
-
-    @staticmethod
-    def user_script():
-        user_scripts = Path(os.path.abspath(__file__)).parent.joinpath('user')
-
-        for file in user_scripts.iterdir():
-            if file.is_file() and file.name.startswith('sync'):
-                user_script = file
-
-        suffix = user_script.suffix[1:]
-
-        if suffix == 'ps1':
-            subprocess.call(['powershell', user_script])
-            return True
-        else:
-            f = open(user_script, 'r')
-            first_line = f.readline().strip()
-            if first_line.startswith('#!'):
-                shebang = first_line[2:]
-                subprocess.call([shebang, user_script])
-                return True
-
-        return False
-
-    @staticmethod
-    def ui_connect_interrupt_btn():
-        Script.ensure_init()
-        Script.world.interrupt_remotes()
-
-    @staticmethod
-    def ui_connect_refresh_ckpts_btn():
-        Script.ensure_init()
-        Script.world.refresh_checkpoints()
-
-    @staticmethod
-    def ui_connect_status():
-        Script.ensure_init()
-        worker_status = ''
-
-        for worker in Script.world.workers:
-            if worker.master:
-                continue
-
-            worker_status += f"{worker.uuid} at {worker.address} is {worker.state.name}\n"
-
-        # TODO replace this with a single check to a state flag that we should make in the world class
-        for worker in Script.world.workers:
-            if worker.state == State.WORKING:
-                return Script.world.__str__(), worker_status
-
-        return 'No active jobs!', worker_status
-
+        extension_ui = UI(script=Script, world=Script.world)
+        extension_ui.create_root()
 
     @staticmethod
     def add_to_gallery(processed, p):
@@ -294,24 +194,15 @@ class Script(scripts.Script):
         except AttributeError:
             batch_size = 1
 
-        if Script.world is None:
-            if Script.verify_remotes is False:
-                logger.warning(f"You have chosen to forego the verification of worker TLS certificates")
-                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-            # construct World
-            Script.world = World(initial_payload=initial_payload, verify_remotes=Script.verify_remotes)
-
-            # add workers to the world
-            for worker in cmd_opts.distributed_remotes:
-                Script.world.add_worker(uuid=worker[0], address=worker[1], port=worker[2])
-
         try:
             Script.world.initialize(batch_size)
             logger.debug(f"World initialized!")
         except WorldAlreadyInitialized:
             Script.world.update_world(total_batch_size=batch_size)
 
+    # p's type is
+    # "modules.processing.StableDiffusionProcessingTxt2Img"
+    # runs every time the generate button is hit
     def run(self, p, *args):
         current_thread().name = "distributed_main"
 

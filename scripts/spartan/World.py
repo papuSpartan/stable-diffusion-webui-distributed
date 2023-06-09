@@ -95,7 +95,6 @@ class World:
         default_worker_batch_size = self.get_default_worker_batch_size()
         self.sync_master(batch_size=default_worker_batch_size)
         self.update_worker_jobs()
-        # self.optimize_jobs(batch_size=default_worker_batch_size)
 
     def initialize(self, total_batch_size):
         """should be called before a world instance is used for anything"""
@@ -178,8 +177,6 @@ class World:
             t.start()
 
     def refresh_checkpoints(self):
-        threads: List[Thread] = []
-
         for worker in self.workers:
             if worker.master:
                 continue
