@@ -63,6 +63,10 @@ class UI:
 
         return 'No active jobs!', worker_status
 
+    def save_btn(self, thin_client_mode):
+        self.world.thin_client_mode = thin_client_mode
+        logger.debug(f"thin client mode is now {thin_client_mode}")
+
     # end handlers
 
     def create_root(self):
@@ -96,5 +100,15 @@ class UI:
                     redo_benchmarks_btn = gradio.Button(value='Redo benchmarks', variant='stop')
                     redo_benchmarks_btn.style(full_width=False)
                     redo_benchmarks_btn.click(self.benchmark_btn, inputs=[], outputs=[])
+
+                with gradio.Tab('Settings'):
+                    thin_client_cbx = gradio.Checkbox(
+                        label='Thin-client mode (experimental)',
+                        info="Only generate images using remote workers. There will be no previews when enabled.",
+                        value=self.world.thin_client_mode
+                    )
+
+                    save_btn = gradio.Button(value='Save')
+                    save_btn.click(fn=self.save_btn, inputs=[thin_client_cbx])
 
             return root

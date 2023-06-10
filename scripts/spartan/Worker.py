@@ -55,7 +55,7 @@ class Worker:
 
     address: str = None
     port: int = None
-    avg_ipm: int = None
+    avg_ipm: float = None
     uuid: str = None
     queried: bool = False  # whether this worker has been connected to yet
     free_vram: bytes = 0
@@ -98,7 +98,7 @@ class Worker:
             self.master = master
             self.uuid = 'master'
             # set to a sentinel value to avoid issues with speed comparisons
-            self.avg_ipm = 0
+            # self.avg_ipm = 0
 
             # right now this is really only for clarity while debugging:
             self.address = server_name
@@ -206,54 +206,51 @@ class Worker:
         num_images = payload['batch_size']
 
         # if worker has not yet been benchmarked then
-        try:
-            eta = (num_images / self.avg_ipm) * 60
-            # show effect of increased step size
-            real_steps_to_benched = steps / benchmark_payload['steps']
-            eta = eta * real_steps_to_benched
+        eta = (num_images / self.avg_ipm) * 60
+        # show effect of increased step size
+        real_steps_to_benched = steps / benchmark_payload['steps']
+        eta = eta * real_steps_to_benched
 
-            # show effect of high-res fix
-            hr = payload.get('enable_hr', False)
-            if hr:
-                eta += self.batch_eta_hr(payload=payload)
+        # show effect of high-res fix
+        hr = payload.get('enable_hr', False)
+        if hr:
+            eta += self.batch_eta_hr(payload=payload)
 
-            # show effect of image size
-            real_pix_to_benched = (payload['width'] * payload['height'])\
-                / (benchmark_payload['width'] * benchmark_payload['height'])
-            eta = eta * real_pix_to_benched
+        # show effect of image size
+        real_pix_to_benched = (payload['width'] * payload['height'])\
+            / (benchmark_payload['width'] * benchmark_payload['height'])
+        eta = eta * real_pix_to_benched
 
-            # show effect of using a sampler other than euler a
-            sampler = payload.get('sampler_name', 'Euler a')
-            if sampler != 'Euler a':
-                try:
-                    percent_difference = self.other_to_euler_a[payload['sampler_name']]
-                    if percent_difference > 0:
-                        eta -= (eta * abs((percent_difference / 100)))
-                    else:
-                        eta += (eta * abs((percent_difference / 100)))
-                except KeyError:
-                    logger.warning(f"Sampler '{payload['sampler_name']}' efficiency is not recorded.\n")
-                    # in this case the sampler will be treated as having the same efficiency as Euler a
+        # show effect of using a sampler other than euler a
+        sampler = payload.get('sampler_name', 'Euler a')
+        if sampler != 'Euler a':
+            try:
+                percent_difference = self.other_to_euler_a[payload['sampler_name']]
+                if percent_difference > 0:
+                    eta -= (eta * abs((percent_difference / 100)))
+                else:
+                    eta += (eta * abs((percent_difference / 100)))
+            except KeyError:
+                logger.warning(f"Sampler '{payload['sampler_name']}' efficiency is not recorded.\n")
+                # in this case the sampler will be treated as having the same efficiency as Euler a
 
-            # TODO save and load each workers MPE before the end of session to workers.json.
-            #  That way initial estimations are more accurate from the second sdwui session onward
-            # adjust for a known inaccuracy in our estimation of this worker using average percent error
-            if len(self.eta_percent_error) > 0:
-                correction = eta * (self.eta_mpe() / 100)
+        # TODO save and load each workers MPE before the end of session to workers.json.
+        #  That way initial estimations are more accurate from the second sdwui session onward
+        # adjust for a known inaccuracy in our estimation of this worker using average percent error
+        if len(self.eta_percent_error) > 0:
+            correction = eta * (self.eta_mpe() / 100)
 
-                if not quiet:
-                    logger.debug(f"worker '{self.uuid}'s last ETA was off by {correction:.2f}%")
-                correction_summary = f"correcting '{self.uuid}'s ETA: {eta:.2f}s -> "
-                # do regression
-                eta -= correction
+            if not quiet:
+                logger.debug(f"worker '{self.uuid}'s last ETA was off by {correction:.2f}%")
+            correction_summary = f"correcting '{self.uuid}'s ETA: {eta:.2f}s -> "
+            # do regression
+            eta -= correction
 
-                if not quiet:
-                    correction_summary += f"{eta:.2f}s"
-                    logger.debug(correction_summary)
+            if not quiet:
+                correction_summary += f"{eta:.2f}s"
+                logger.debug(correction_summary)
 
-            return eta
-        except Exception as e:
-            raise e
+        return eta
 
     def request(self, payload: dict, option_payload: dict, sync_options: bool):
         """
@@ -295,8 +292,8 @@ class Worker:
 
             if self.benchmarked:
                 eta = self.batch_eta(payload=payload) * payload['n_iter']
-                logger.debug(f"worker '{self.uuid}' predicts it will take {eta:.3f}s to generate {payload['batch_size']} image("
-                      f"s) at a speed of {self.avg_ipm} ipm\n")
+                logger.debug(f"worker '{self.uuid}' predicts it will take {eta:.3f}s to generate {payload['batch_size'] * payload['n_iter']} image("
+                      f"s) at a speed of {self.avg_ipm:.2f} ipm\n")
 
             try:
                 # remove anything that is not serializable
@@ -453,7 +450,7 @@ class Worker:
         ipm_sum = 0
         for ipm in results:
             ipm_sum += ipm
-        avg_ipm = math.floor(ipm_sum / samples)
+        avg_ipm = ipm_sum / samples
 
         logger.debug(f"Worker '{self.uuid}' average ipm: {avg_ipm}")
         self.avg_ipm = avg_ipm

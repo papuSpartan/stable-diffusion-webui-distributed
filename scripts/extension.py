@@ -21,7 +21,7 @@ from scripts.spartan.UI import UI
 from modules.shared import opts
 from scripts.spartan.shared import logger
 from scripts.spartan.control_net import pack_control_net
-from modules.processing import fix_seed
+from modules.processing import fix_seed, Processed
 
 
 # TODO implement SSDP advertisement of some sort in sdwui api to allow extension to automatically discover workers?
@@ -67,32 +67,47 @@ class Script(scripts.Script):
         def processed_inject_image(image, info_index, iteration: int, save_path_override=None, grid=False, response=None):
             image_params: json = response["parameters"]
             image_info_post: json = json.loads(response["info"])  # image info known after processing
+            num_response_images = image_params["batch_size"] * image_params["n_iter"]
+
+            seed = None
+            subseed = None
+            negative_prompt = None
+
 
             try:
-                # some metadata
-                processed.all_seeds.append(image_info_post["all_seeds"][info_index])
-                processed.all_subseeds.append(image_info_post["all_subseeds"][info_index])
-                processed.all_negative_prompts.append(image_info_post["all_negative_prompts"][info_index])
+                if num_response_images > 1:
+                    seed = image_info_post['all_seeds'][info_index]
+                    subseed = image_info_post['all_subseeds'][info_index]
+                    negative_prompt = image_info_post['all_negative_prompts'][info_index]
+                else:
+                    seed = image_info_post['seed']
+                    subseed = image_info_post['subseed']
+                    negative_prompt = image_info_post['negative_prompt']
             except Exception:
                 # like with controlnet masks, there isn't always full post-gen info, so we use the first images'
                 logger.debug(f"Image at index {i} for '{worker.uuid}' was missing some post-generation data")
                 processed_inject_image(image=image, info_index=0, iteration=iteration)
                 return
 
+            processed.all_seeds.append(seed)
+            processed.all_subseeds.append(subseed)
+            processed.all_negative_prompts.append(negative_prompt)
             processed.all_prompts.append(image_params["prompt"])
             processed.images.append(image)  # actual received image
 
             # generate info-text string
+            # modules.ui_common -> update_generation_info renders to html below gallery
             images_per_batch = p.n_iter * p.batch_size
             # zero-indexed position of image in total batch (so including master results)
             true_image_pos = len(processed.images) - 1
             num_remote_images = images_per_batch * p.batch_size
             if p.n_iter > 1:  # if splitting by batch count
                 num_remote_images *= p.n_iter - 1
-            info_text_used_seed_index = info_index + p.n_iter * p.batch_size if not grid else 0
 
-            if iteration != 0:
-                logger.debug(f"iteration {iteration}/{p.n_iter}, image {true_image_pos + 1}/{Script.world.total_batch_size * p.n_iter}, info-index: {info_index}, used seed index {info_text_used_seed_index}")
+            logger.debug(f"iteration {iteration}/{p.n_iter}, image {true_image_pos + 1}/{Script.world.total_batch_size * p.n_iter}, info-index: {info_index}")
+
+            if Script.world.thin_client_mode:
+                p.all_negative_prompts = processed.all_negative_prompts
 
             info_text = processing.create_infotext(
                 p=p,
@@ -239,7 +254,7 @@ class Script(scripts.Script):
         # encapsulating the request object within a txt2imgreq object is deprecated and no longer works
         # see test/basic_features/txt2img_test.py for an example
         payload = copy.copy(p.__dict__)
-        payload['batch_size'] = Script.world.get_default_worker_batch_size()
+        payload['batch_size'] = Script.world.default_batch_size()
         payload['scripts'] = None
         del payload['script_args']
 
@@ -295,12 +310,23 @@ class Script(scripts.Script):
             started_jobs.append(job)
 
         # if master batch size was changed again due to optimization change it to the updated value
-        p.batch_size = Script.world.get_master_batch_size()
+        if not self.world.thin_client_mode:
+            p.batch_size = Script.world.master_job().batch_size
         Script.master_start = time.time()
 
         # generate images assigned to local machine
         p.do_not_save_grid = True  # don't generate grid from master as we are doing this later.
-        processed = processing.process_images(p, *args)
-        Script.add_to_gallery(processed, p)
+        if Script.world.thin_client_mode:
+            p.batch_size = 0
+            processed = Processed(p=p, images_list=[])
+            processed.all_prompts = []
+            processed.all_seeds = []
+            processed.all_subseeds = []
+            processed.all_negative_prompts = []
+            processed.infotexts = []
+            processed.prompt = None
+        else:
+            processed = processing.process_images(p, *args)
 
+        Script.add_to_gallery(processed, p)
         return processed

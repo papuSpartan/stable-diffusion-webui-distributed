@@ -72,14 +72,15 @@ class World:
     worker_info_path = this_extension_path.joinpath('workers.json')
 
     def __init__(self, initial_payload, verify_remotes: bool = True):
-        master_worker = Worker(master=True)
+        self.master_worker = Worker(master=True)
         self.total_batch_size: int = 0
-        self.__workers: List[Worker] = [master_worker]
+        self.__workers: List[Worker] = [self.master_worker]
         self.jobs: List[Job] = []
         self.job_timeout: int = 6  # seconds
         self.initialized: bool = False
         self.verify_remotes = verify_remotes
         self.initial_payload = copy.copy(initial_payload)
+        self.thin_client_mode = False
 
     def update_world(self, total_batch_size):
         """
@@ -91,10 +92,7 @@ class World:
         """
 
         self.total_batch_size = total_batch_size
-
-        default_worker_batch_size = self.get_default_worker_batch_size()
-        self.sync_master(batch_size=default_worker_batch_size)
-        self.update_worker_jobs()
+        self.update_jobs()
 
     def initialize(self, total_batch_size):
         """should be called before a world instance is used for anything"""
@@ -105,36 +103,18 @@ class World:
         self.update_world(total_batch_size=total_batch_size)
         self.initialized = True
 
-    def get_default_worker_batch_size(self) -> int:
+    def default_batch_size(self) -> int:
         """the amount of images/total images requested that a worker would compute if conditions were perfect and
-        each worker generated at the same speed"""
+        each worker generated at the same speed. assumes one batch only"""
 
-        return self.total_batch_size // self.world_size()
+        return self.total_batch_size // self.size()
 
-    def world_size(self) -> int:
+    def size(self) -> int:
         """
         Returns:
             int: The number of nodes currently registered in the world.
         """
         return len(self.get_workers())
-
-    def sync_master(self, batch_size: int):
-        """
-        update the master node's pseudo-job with <batch_size> of images it will be processing
-        """
-
-        if len(self.jobs) < 1:
-            master_job = Job(worker=self.master(), batch_size=batch_size)
-            self.jobs.append(master_job)
-        else:
-            self.master_job().batch_size = batch_size
-
-    def get_master_batch_size(self) -> int:
-        """
-        Returns:
-            int: The number of images the master worker is currently set to generate.
-        """
-        return self.master_job().batch_size
 
     def master(self) -> Worker:
         """
@@ -143,12 +123,7 @@ class World:
             Worker: The local/master worker object.
         """
 
-        workers = self.get_workers()
-        master = workers[0]
-        if master.master is False:
-            raise RuntimeError("Master should be the first worker in the list")
-
-        return master
+        return self.master_worker
 
     def master_job(self) -> Job:
         """
@@ -157,7 +132,9 @@ class World:
             Job: The local/master worker job object.
         """
 
-        return self.jobs[0]
+        for job in self.jobs:
+            if job.worker.master:
+                return job
 
     def add_worker(self, uuid: str, address: str, port: int):
         """
@@ -384,36 +361,34 @@ class World:
         self.master().benchmarked = True
         return ipm
 
-    def update_worker_jobs(self):
+    def update_jobs(self):
         """creates initial jobs (before optimization) """
-        default_job_size = self.get_default_worker_batch_size()
 
         # clear jobs if this is not the first time running
-        if self.initialized:
-            master_job = self.jobs[0]
-            self.jobs = [master_job]
+        self.jobs = []
 
+        batch_size = self.default_batch_size()
         for worker in self.get_workers():
-            if worker.master:
-                self.master_job().batch_size = default_job_size
-                continue
-
-            batch_size = default_job_size
             self.jobs.append(Job(worker=worker, batch_size=batch_size))
 
     def get_workers(self):
         filtered = []
         for worker in self.__workers:
+            if worker.avg_ipm is not None and worker.avg_ipm <= 0:
+                logger.warn(f"config reports invalid speed (0 ipm) for worker '{worker.uuid}', setting default of 1 ipm.\nplease re-benchmark")
+                worker.avg_ipm = 1
+                continue
+            if worker.master and self.thin_client_mode:
+                continue
             if worker.state != State.UNAVAILABLE:
                 filtered.append(worker)
 
         return filtered
 
-
     def optimize_jobs(self, payload: json):
         """
         The payload batch_size should be set to whatever the default worker batch_size would be. 
-        get_default_worker_batch_size() should return the proper value if the world is initialized
+        default_batch_size() should return the proper value if the world is initialized
         Ex. 3 workers(including master): payload['batch_size'] should evaluate to 1
         """
 
@@ -495,15 +470,6 @@ class World:
             num_images_compensate = int(slack_time / secs_per_batch_image)
 
             job.batch_size = num_images_compensate
-
-        # TODO master batch_size cannot be < 1 or it will crash the entire generation.
-        #  It might be better to just inject a black image. (if master is that slow)
-        master_job = self.master_job()
-        if master_job.batch_size < 1:
-            logger.warning("Master couldn't keep up... defaulting to 1 image")
-            master_job.batch_size = 1
-
-
 
         logger.info("Job distribution:")
         iterations = payload['n_iter']
