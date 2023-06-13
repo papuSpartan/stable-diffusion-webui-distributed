@@ -274,12 +274,16 @@ class Worker:
                     self.full_url("memory"),
                     verify=self.verify_remotes
                 )
-                memory_response = memory_response.json()['cuda']['system']  # all in bytes
-
-                free_vram = int(memory_response['free']) / (1024 * 1024 * 1024)
-                total_vram = int(memory_response['total']) / (1024 * 1024 * 1024)
-                logger.debug(f"Worker '{self.uuid}' {free_vram:.2f}/{total_vram:.2f} GB VRAM free\n")
-                self.free_vram = bytes(memory_response['free'])
+                memory_response = memory_response.json()
+                try:
+                    memory_response = memory_response['cuda']['system']  # all in bytes
+                    free_vram = int(memory_response['free']) / (1024 * 1024 * 1024)
+                    total_vram = int(memory_response['total']) / (1024 * 1024 * 1024)
+                    logger.debug(f"Worker '{self.uuid}' {free_vram:.2f}/{total_vram:.2f} GB VRAM free\n")
+                    self.free_vram = bytes(memory_response['free'])
+                except KeyError:
+                    error = memory_response['cuda']['error']
+                    logger.debug(f"CUDA doesn't seem to be available for worker '{self.uuid}'\nError: {error}")
 
             if sync_options is True:
                 options_response = requests.post(
