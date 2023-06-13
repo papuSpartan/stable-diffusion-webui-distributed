@@ -368,8 +368,8 @@ class Worker:
                     self.response_time = time.time() - start
                     variance = ((eta - self.response_time) / self.response_time) * 100
 
-                    logger.debug(f"\nWorker '{self.uuid}'s ETA was off by {variance:.2f}%.\n")
-                    logger.debug(f"Predicted {eta:.2f}s. Actual: {self.response_time:.2f}s\n")
+                    logger.debug(f"\nWorker '{self.uuid}'s ETA was off by {variance:.2f}%.\n"
+                                 f"Predicted {eta:.2f}s. Actual: {self.response_time:.2f}s\n")
 
                     # if the variance is greater than 500% then we ignore it to prevent variation inflation
                     if abs(variance) < 500:

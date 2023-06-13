@@ -63,9 +63,12 @@ class UI:
 
         return 'No active jobs!', worker_status
 
-    def save_btn(self, thin_client_mode):
+    def save_btn(self, thin_client_mode, job_timeout):
         self.world.thin_client_mode = thin_client_mode
         logger.debug(f"thin client mode is now {thin_client_mode}")
+        job_timeout = int(job_timeout)
+        self.world.job_timeout = job_timeout
+        logger.debug(f"job timeout is now {job_timeout} seconds")
 
     # end handlers
 
@@ -107,8 +110,13 @@ class UI:
                         info="Only generate images using remote workers. There will be no previews when enabled.",
                         value=self.world.thin_client_mode
                     )
+                    job_timeout = gradio.Number(
+                        label='Job timeout', value=self.world.job_timeout,
+                        info="Seconds until a worker is considered too slow to be assigned an"
+                             "equal share of the total request. Longer than 2 seconds is recommended."
+                    )
 
                     save_btn = gradio.Button(value='Save')
-                    save_btn.click(fn=self.save_btn, inputs=[thin_client_cbx])
+                    save_btn.click(fn=self.save_btn, inputs=[thin_client_cbx, job_timeout])
 
             return root
