@@ -113,7 +113,7 @@ class UI:
                     job_timeout = gradio.Number(
                         label='Job timeout', value=self.world.job_timeout,
                         info="Seconds until a worker is considered too slow to be assigned an"
-                             "equal share of the total request. Longer than 2 seconds is recommended."
+                             " equal share of the total request. Longer than 2 seconds is recommended."
                     )
 
                     save_btn = gradio.Button(value='Save')

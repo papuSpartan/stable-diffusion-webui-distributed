@@ -38,6 +38,7 @@ class Script(scripts.Script):
     alwayson = False
     first_run = True
     master_start = None
+    runs_since_init = 0
 
     if verify_remotes is False:
         logger.warning(f"You have chosen to forego the verification of worker TLS certificates")
@@ -146,25 +147,21 @@ class Script(scripts.Script):
         # some worker which we know has a good response that we can use for generating the grid
         donor_worker = None
         spoofed_iteration = p.n_iter
-        for worker in Script.world.get_workers():
-
-            expected_images = 1
-            for job in Script.world.jobs:
-                if job.worker == worker:
-                    expected_images = job.batch_size * p.n_iter
+        for job in Script.world.jobs:
+            if job.batch_size < 1 or job.worker.master:
+                continue
 
             try:
-                images: json = worker.response["images"]
+                images: json = job.worker.response["images"]
                 # if we for some reason get more than we asked for
-                if expected_images < len(images):
-                    logger.debug(f"Requested {expected_images} images from '{worker.uuid}', got {len(images)}")
+                if job.batch_size < len(images):
+                    logger.debug(f"Requested {job.batch_size} images from '{job.worker.uuid}', got {len(images)}")
 
                 if donor_worker is None:
-                    donor_worker = worker
-            except Exception:
-                if worker.master is False:
-                    logger.warning(f"Worker '{worker.uuid}' had nothing")
-                continue
+                    donor_worker = job.worker
+            except KeyError:
+                if job.batch_size > 0:
+                    logger.warning(f"Worker '{job.worker.uuid}' had nothing")
 
             injected_to_iteration = 0
             images_per_iteration = Script.world.get_current_output_size()
@@ -174,7 +171,7 @@ class Script(scripts.Script):
                 image = Image.open(io.BytesIO(image_bytes))
 
                 # inject image
-                processed_inject_image(image=image, info_index=i, iteration=spoofed_iteration, response=worker.response)
+                processed_inject_image(image=image, info_index=i, iteration=spoofed_iteration, response=job.worker.response)
 
                 if injected_to_iteration >= images_per_iteration - 1:
                     spoofed_iteration += 1
@@ -249,7 +246,8 @@ class Script(scripts.Script):
                 continue
             else:
                 # https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111/issues/12#issuecomment-1480382514
-                logger.warning(f"Distributed doesn't yet support '{title}'")
+                if Script.runs_since_init < 1:
+                    logger.warning(f"Distributed doesn't yet support '{title}'")
 
         # encapsulating the request object within a txt2imgreq object is deprecated and no longer works
         # see test/basic_features/txt2img_test.py for an example
@@ -329,4 +327,5 @@ class Script(scripts.Script):
             processed = processing.process_images(p, *args)
 
         Script.add_to_gallery(processed, p)
+        Script.runs_since_init += 1
         return processed

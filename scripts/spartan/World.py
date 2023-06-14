@@ -471,9 +471,9 @@ class World:
 
             job.batch_size = num_images_compensate
 
-        logger.info("Job distribution:")
+        distro_summary = "Job distribution:\n"
         iterations = payload['n_iter']
-        logger.info(f"{self.total_batch_size} * {iterations} iteration(s): {self.total_batch_size * iterations} images")
+        distro_summary += f"{self.total_batch_size} * {iterations} iteration(s): {self.total_batch_size * iterations} images total\n"
         for job in self.jobs:
-            logger.info(f"worker '{job.worker.uuid}' - {job.batch_size * iterations} images")
-        print()
+            distro_summary += f"'{job.worker.uuid}' - {job.batch_size * iterations} images\n"
+        logger.info(distro_summary)
