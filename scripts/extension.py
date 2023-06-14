@@ -276,9 +276,15 @@ class Script(scripts.Script):
         }
 
         # start generating images assigned to remote machines
-        sync = False  # should only really to sync once per job
+        sync = False  # should only really need to sync once per job
         Script.world.optimize_jobs(payload)  # optimize work assignment before dispatching
         started_jobs = []
+
+        # check if anything even needs to be done
+        if len(Script.world.jobs) == 1 and Script.world.jobs[0].worker.master:
+            logger.debug(f"distributed doesn't have to do anything, returning control to webui")
+            return
+
         for job in Script.world.jobs:
             payload_temp = copy.deepcopy(payload)
 

@@ -375,7 +375,7 @@ class World:
         filtered = []
         for worker in self.__workers:
             if worker.avg_ipm is not None and worker.avg_ipm <= 0:
-                logger.warn(f"config reports invalid speed (0 ipm) for worker '{worker.uuid}', setting default of 1 ipm.\nplease re-benchmark")
+                logger.warning(f"config reports invalid speed (0 ipm) for worker '{worker.uuid}', setting default of 1 ipm.\nplease re-benchmark")
                 worker.avg_ipm = 1
                 continue
             if worker.master and self.thin_client_mode:
@@ -477,3 +477,10 @@ class World:
         for job in self.jobs:
             distro_summary += f"'{job.worker.uuid}' - {job.batch_size * iterations} images\n"
         logger.info(distro_summary)
+
+        # delete any jobs that have no work
+        last = len(self.jobs) - 1
+        while last > 0:
+            if self.jobs[last].batch_size < 1:
+                del self.jobs[last]
+            last -= 1
