@@ -161,7 +161,14 @@ class Script(scripts.Script):
                     donor_worker = job.worker
             except KeyError:
                 if job.batch_size > 0:
-                    logger.warning(f"Worker '{job.worker.uuid}' had nothing")
+                    logger.warning(f"Worker '{job.worker.uuid}' had no images")
+                continue
+            except TypeError as e:
+                if job.worker.response is None:
+                    logger.error(f"worker '{job.worker.uuid}' had no response")
+                else:
+                    logger.exception(e)
+                continue
 
             injected_to_iteration = 0
             images_per_iteration = Script.world.get_current_output_size()
@@ -178,6 +185,10 @@ class Script(scripts.Script):
                     injected_to_iteration = 0
                 else:
                     injected_to_iteration += 1
+
+        if donor_worker is None:
+            logger.critical("couldn't collect any responses, distributed will do nothing")
+            return
 
         # generate and inject grid
         if opts.return_grid:

@@ -16,6 +16,7 @@ import json
 import base64
 import queue
 from modules.shared import state as master_state
+from modules.api.api import encode_pil_to_base64
 
 
 class InvalidWorkerResponse(Exception):
@@ -321,6 +322,14 @@ class Worker:
                         image = 'data:image/png;base64,' + str(base64.b64encode(buffer.getvalue()), 'utf-8')
                         images.append(image)
                     payload['init_images'] = images
+
+                # if an image mask is present
+                image_mask = payload.get('image_mask', None)
+                if image_mask is not None:
+                    image_b64 = encode_pil_to_base64(image_mask)
+                    image_b64 = str(image_b64, 'utf-8')
+                    payload['mask'] = image_b64
+                    del payload['image_mask']
 
                 # see if there is anything else wrong with serializing to payload
                 try:
