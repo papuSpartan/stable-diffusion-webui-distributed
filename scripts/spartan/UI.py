@@ -116,7 +116,15 @@ class UI:
                              " equal share of the total request. Longer than 2 seconds is recommended."
                     )
 
-                    save_btn = gradio.Button(value='Save')
+                    save_btn = gradio.Button(value='Update')
                     save_btn.click(fn=self.save_btn, inputs=[thin_client_cbx, job_timeout])
+
+                with gradio.Tab('Help'):
+                    gradio.Markdown(
+                        """
+                        - [Discord Server 🤝](https://discord.gg/Jpc8wnftd4)
+                        - [Github Repository </>](https://github.com/papuSpartan/stable-diffusion-webui-distributed)
+                        """
+                    )
 
             return root
