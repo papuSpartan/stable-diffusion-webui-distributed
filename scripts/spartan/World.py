@@ -15,12 +15,9 @@ from inspect import getsourcefile
 from os.path import abspath
 from pathlib import Path
 from modules.processing import process_images, StableDiffusionProcessingTxt2Img
-# from modules.shared import cmd_opts
 import modules.shared as shared
-from scripts.spartan.Worker import Worker
-from scripts.spartan.shared import benchmark_payload, logger, warmup_samples
-# from modules.errors import display
-import gradio as gr
+from scripts.spartan.Worker import Worker, State
+from scripts.spartan.shared import logger, warmup_samples, benchmark_payload
 
 
 class NotBenchmarked(Exception):
@@ -75,14 +72,15 @@ class World:
     worker_info_path = this_extension_path.joinpath('workers.json')
 
     def __init__(self, initial_payload, verify_remotes: bool = True):
-        master_worker = Worker(master=True)
+        self.master_worker = Worker(master=True)
         self.total_batch_size: int = 0
-        self.workers: List[Worker] = [master_worker]
+        self.__workers: List[Worker] = [self.master_worker]
         self.jobs: List[Job] = []
         self.job_timeout: int = 6  # seconds
         self.initialized: bool = False
         self.verify_remotes = verify_remotes
         self.initial_payload = copy.copy(initial_payload)
+        self.thin_client_mode = False
 
     def update_world(self, total_batch_size):
         """
@@ -93,17 +91,8 @@ class World:
             total_batch_size (int): The total number of images requested by the local/master sdwui instance.
         """
 
-        world_size = self.get_world_size()
-        if total_batch_size < world_size:
-            self.total_batch_size = world_size
-            logger.debug(f"Defaulting to a total batch size of '{world_size}' in order to accommodate all workers")
-        else:
-            self.total_batch_size = total_batch_size
-
-        default_worker_batch_size = self.get_default_worker_batch_size()
-        self.sync_master(batch_size=default_worker_batch_size)
-        self.update_worker_jobs()
-        # self.optimize_jobs(batch_size=default_worker_batch_size)
+        self.total_batch_size = total_batch_size
+        self.update_jobs()
 
     def initialize(self, total_batch_size):
         """should be called before a world instance is used for anything"""
@@ -114,36 +103,18 @@ class World:
         self.update_world(total_batch_size=total_batch_size)
         self.initialized = True
 
-    def get_default_worker_batch_size(self) -> int:
+    def default_batch_size(self) -> int:
         """the amount of images/total images requested that a worker would compute if conditions were perfect and
-        each worker generated at the same speed"""
+        each worker generated at the same speed. assumes one batch only"""
 
-        return self.total_batch_size // self.get_world_size()
+        return self.total_batch_size // self.size()
 
-    def get_world_size(self) -> int:
+    def size(self) -> int:
         """
         Returns:
             int: The number of nodes currently registered in the world.
         """
-        return len(self.workers)
-
-    def sync_master(self, batch_size: int):
-        """
-        update the master node's pseudo-job with <batch_size> of images it will be processing
-        """
-
-        if len(self.jobs) < 1:
-            master_job = Job(worker=self.workers[0], batch_size=batch_size)
-            self.jobs.append(master_job)
-        else:
-            self.master_job().batch_size = batch_size
-
-    def get_master_batch_size(self) -> int:
-        """
-        Returns:
-            int: The number of images the master worker is currently set to generate.
-        """
-        return self.master_job().batch_size
+        return len(self.get_workers())
 
     def master(self) -> Worker:
         """
@@ -152,7 +123,7 @@ class World:
             Worker: The local/master worker object.
         """
 
-        return self.workers[0]
+        return self.master_worker
 
     def master_job(self) -> Job:
         """
@@ -161,7 +132,9 @@ class World:
             Job: The local/master worker job object.
         """
 
-        return self.jobs[0]
+        for job in self.jobs:
+            if job.worker.master:
+                return job
 
     def add_worker(self, uuid: str, address: str, port: int):
         """
@@ -174,12 +147,11 @@ class World:
         """
 
         worker = Worker(uuid=uuid, address=address, port=port, verify_remotes=self.verify_remotes)
-        self.workers.append(worker)
+        self.__workers.append(worker)
 
     def interrupt_remotes(self):
-        threads: List[Thread] = []
 
-        for worker in self.workers:
+        for worker in self.get_workers():
             if worker.master:
                 continue
 
@@ -187,9 +159,7 @@ class World:
             t.start()
 
     def refresh_checkpoints(self):
-        threads: List[Thread] = []
-
-        for worker in self.workers:
+        for worker in self.get_workers():
             if worker.master:
                 continue
 
@@ -204,39 +174,69 @@ class World:
 
         workers_info: dict = {}
         saved: bool = os.path.exists(self.worker_info_path)
-        benchmark_payload_loaded: bool = False
+        unbenched_workers = []
+        benchmark_threads = []
+
+        def benchmark_wrapped(worker):
+            bench_func = worker.benchmark if not worker.master else self.benchmark_master
+            worker.avg_ipm = bench_func()
+            worker.benchmarked = True
 
         if rebenchmark:
             saved = False
-            for worker in self.workers:
+            workers = self.get_workers()
+
+            for worker in workers:
                 worker.benchmarked = False
+            unbenched_workers = workers
 
         if saved:
             with open(self.worker_info_path, 'r') as worker_info_file:
-                workers_info = json.load(worker_info_file)
+                try:
+                    workers_info = json.load(worker_info_file)
+                except json.JSONDecodeError:
+                    logger.error(f"workers.json is not valid JSON, regenerating")
+                    rebenchmark = True
+                    unbenched_workers = self.get_workers()
 
-        # benchmark all nodes
-        for worker in self.workers:
+        # load stats for any workers that have already been benched
+        if saved and not rebenchmark:
+            logger.debug(f"loaded saved configuration: \n{workers_info}")
 
-            if not saved:
-                if worker.master:
-                    self.master().avg_ipm = self.benchmark_master()
-                    workers_info.update(self.master().info(benchmark_payload=benchmark_payload))
-                else:
-                    worker.benchmark()
-            else:
-                if not benchmark_payload_loaded:
-                    benchmark_payload = workers_info[worker.uuid]['benchmark_payload']
-                    benchmark_payload_loaded = True
+            for worker in self.get_workers():
+                try:
+                    worker.avg_ipm = workers_info[worker.uuid]['avg_ipm']
+                    worker.benchmarked = True
+                except KeyError:
+                    logger.debug(f"worker '{worker.uuid}' not found in workers.json")
+                    unbenched_workers.append(worker)
+            return
+        else:
+            unbenched_workers = self.get_workers()
 
-                    logger.debug(f"loaded saved worker configuration: \n{workers_info}")
-                worker.avg_ipm = workers_info[worker.uuid]['avg_ipm']
-                worker.benchmarked = True
+        # benchmark those that haven't been
+        for worker in unbenched_workers:
+            t = Thread(target=benchmark_wrapped, args=(worker, ), name=f"{worker.uuid}_benchmark")
+            benchmark_threads.append(t)
+            t.start()
+            logger.info(f"benchmarking worker '{worker.uuid}'")
 
-            workers_info.update(worker.info(benchmark_payload=benchmark_payload))
+        # wait for all benchmarks to finish and update stats on newly benchmarked workers
+        if len(benchmark_threads) > 0:
+            with open(self.worker_info_path, 'w') as worker_info_file:
+                for t in benchmark_threads:
+                    t.join()
+                logger.info("Benchmarking finished")
 
-        with open(self.worker_info_path, 'w') as worker_info_file:
-            json.dump(workers_info, worker_info_file, indent=3)
+                for worker in unbenched_workers:
+                    workers_info.update(worker.info())
+                workers_info.update({'benchmark_payload': benchmark_payload})
+
+                # save benchmark results to workers.json
+                json.dump(workers_info, worker_info_file, indent=3)
+
+        logger.info(self.speed_summary())
+
 
     def get_current_output_size(self) -> int:
         """
@@ -250,19 +250,25 @@ class World:
 
         return num_images
 
-    # TODO broken
-    def print_speed_stats(self):
+    def speed_summary(self) -> str:
         """
-        Prints workers by their ipm in descending order.
+        Returns string listing workers by their ipm in descending order.
         """
-        workers_copy = copy.deepcopy(self.workers)
+        workers_copy = copy.deepcopy(self.__workers)
+        workers_copy.sort(key=lambda w: w.avg_ipm, reverse=True)
+
+        total_ipm = 0
+        for worker in workers_copy:
+            total_ipm += worker.avg_ipm
 
         i = 1
-        workers_copy.sort(key=lambda w: w.avg_ipm, reverse=True)
-        print("Worker speed hierarchy:")
+        output = "World composition:\n"
         for worker in workers_copy:
-            print(f"{i}.    worker '{worker}' - {worker.avg_ipm} ipm")
+            output += f"{i}. '{worker.uuid}'({worker}) - {worker.avg_ipm:.2f} ipm\n"
             i += 1
+        output += f"total: ~{total_ipm:.2f} ipm"
+
+        return output
 
     def __str__(self):
         # print status of all jobs
@@ -282,6 +288,9 @@ class World:
         fast_jobs: List[Job] = []
 
         for job in self.jobs:
+            if job.worker.benchmarked is False or job.worker.avg_ipm is None:
+                continue
+
             if job.complementary is False:
                 fast_jobs.append(job)
 
@@ -322,7 +331,6 @@ class World:
 
         return lag
 
-    # TODO account for generation "warm-up" lag
     def benchmark_master(self) -> float:
         """
         Benchmarks the local/master worker.
@@ -330,7 +338,6 @@ class World:
         Returns:
             float: Local worker speed in ipm
         """
-        global benchmark_payload
 
         # wrap our benchmark payload
         master_bench_payload = StableDiffusionProcessingTxt2Img()
@@ -339,8 +346,6 @@ class World:
         # Keeps from trying to save the images when we don't know the path. Also, there's not really any reason to.
         master_bench_payload.do_not_save_samples = True
 
-        # make it seem as though this never happened
-        state_cache = copy.deepcopy(shared.state)
         # "warm up" due to initial generation lag
         for i in range(warmup_samples):
             process_images(master_bench_payload)
@@ -349,7 +354,6 @@ class World:
         start = time.time()
         process_images(master_bench_payload)
         elapsed = time.time() - start
-        shared.state = state_cache
 
         ipm = benchmark_payload['batch_size'] / (elapsed / 60)
 
@@ -357,27 +361,34 @@ class World:
         self.master().benchmarked = True
         return ipm
 
-    def update_worker_jobs(self):
+    def update_jobs(self):
         """creates initial jobs (before optimization) """
-        default_job_size = self.get_default_worker_batch_size()
 
         # clear jobs if this is not the first time running
-        if self.initialized:
-            master_job = self.jobs[0]
-            self.jobs = [master_job]
+        self.jobs = []
 
-        for worker in self.workers:
-            if worker.master:
-                self.master_job().batch_size = default_job_size
-                continue
-
-            batch_size = default_job_size
+        batch_size = self.default_batch_size()
+        for worker in self.get_workers():
             self.jobs.append(Job(worker=worker, batch_size=batch_size))
+
+    def get_workers(self):
+        filtered = []
+        for worker in self.__workers:
+            if worker.avg_ipm is not None and worker.avg_ipm <= 0:
+                logger.warning(f"config reports invalid speed (0 ipm) for worker '{worker.uuid}', setting default of 1 ipm.\nplease re-benchmark")
+                worker.avg_ipm = 1
+                continue
+            if worker.master and self.thin_client_mode:
+                continue
+            if worker.state != State.UNAVAILABLE:
+                filtered.append(worker)
+
+        return filtered
 
     def optimize_jobs(self, payload: json):
         """
         The payload batch_size should be set to whatever the default worker batch_size would be. 
-        get_default_worker_batch_size() should return the proper value if the world is initialized
+        default_batch_size() should return the proper value if the world is initialized
         Ex. 3 workers(including master): payload['batch_size'] should evaluate to 1
         """
 
@@ -385,18 +396,22 @@ class World:
         # the maximum amount of images that a "slow" worker can produce in the slack space where other nodes are working
         # max_compensation = 4 currently unused
         images_per_job = None
-
+        images_checked = 0
         for job in self.jobs:
 
             lag = self.job_stall(job.worker, payload=payload)
 
             if lag < self.job_timeout or lag == 0:
                 job.batch_size = payload['batch_size']
+                images_checked += payload['batch_size']
                 continue
 
             logger.debug(f"worker '{job.worker.uuid}' would stall the image gallery by ~{lag:.2f}s\n")
             job.complementary = True
-            deferred_images = deferred_images + payload['batch_size']
+            if deferred_images + images_checked + payload['batch_size'] > self.total_batch_size:
+                logger.debug(f"would go over actual requested size")
+            else:
+                deferred_images += payload['batch_size']
             job.batch_size = 0
 
         ####################################################
@@ -408,6 +423,25 @@ class World:
             images_per_job = deferred_images // len(realtime_jobs)
             for job in realtime_jobs:
                 job.batch_size = job.batch_size + images_per_job
+
+        #######################
+        # remainder handling  #
+        #######################
+
+        # when total number of requested images was not cleanly divisible by world size then we tack the remainder on
+        remainder_images = self.total_batch_size - self.get_current_output_size()
+        if remainder_images >= 1:
+            logger.debug(f"The requested number of images({self.total_batch_size}) was not cleanly divisible by the number of realtime nodes({len(self.realtime_jobs())}) resulting in {remainder_images} that will be redistributed")
+
+            realtime_jobs = self.realtime_jobs()
+            realtime_jobs.sort(key=lambda x: x.batch_size)
+            # round-robin distribute the remaining images
+            while remainder_images >= 1:
+                for job in realtime_jobs:
+                    if remainder_images < 1:
+                        break
+                    job.batch_size += 1
+                    remainder_images -= 1
 
         #####################################
         # complementary worker distribution #
@@ -426,7 +460,8 @@ class World:
 
             # in the case that this worker is now taking on what others workers would have been (if they were real-time)
             # this means that there will be more slack time for complementary nodes
-            slack_time = slack_time + ((slack_time / payload['batch_size']) * images_per_job)
+            if images_per_job is not None:
+                slack_time = slack_time + ((slack_time / payload['batch_size']) * images_per_job)
 
             # see how long it would take to produce only 1 image on this complementary worker
             fake_payload = copy.copy(payload)
@@ -436,14 +471,16 @@ class World:
 
             job.batch_size = num_images_compensate
 
-        # TODO master batch_size cannot be < 1 or it will crash the entire generation.
-        #  It might be better to just inject a black image. (if master is that slow)
-        master_job = self.master_job()
-        if master_job.batch_size < 1:
-            logger.warning("Master couldn't keep up... defaulting to 1 image")
-            master_job.batch_size = 1
-
-        logger.info("Job distribution:")
+        distro_summary = "Job distribution:\n"
+        iterations = payload['n_iter']
+        distro_summary += f"{self.total_batch_size} * {iterations} iteration(s): {self.total_batch_size * iterations} images total\n"
         for job in self.jobs:
-            logger.info(f"worker '{job.worker.uuid}' - {job.batch_size} images")
-        print()
+            distro_summary += f"'{job.worker.uuid}' - {job.batch_size * iterations} images\n"
+        logger.info(distro_summary)
+
+        # delete any jobs that have no work
+        last = len(self.jobs) - 1
+        while last > 0:
+            if self.jobs[last].batch_size < 1:
+                del self.jobs[last]
+            last -= 1
