@@ -14,11 +14,11 @@ from typing import List
 import urllib3
 import copy
 from modules.images import save_image
-from modules.shared import cmd_opts
+from modules.shared import opts, cmd_opts
+from modules.shared import state as webui_state
 import time
 from scripts.spartan.World import World, WorldAlreadyInitialized
 from scripts.spartan.UI import UI
-from modules.shared import opts
 from scripts.spartan.shared import logger
 from scripts.spartan.control_net import pack_control_net
 from modules.processing import fix_seed, Processed
@@ -47,8 +47,12 @@ class Script(scripts.Script):
     # build world
     world = World(initial_payload=None, verify_remotes=verify_remotes)
     # add workers to the world
-    for worker in cmd_opts.distributed_remotes:
-        world.add_worker(uuid=worker[0], address=worker[1], port=worker[2])
+    # make sure arguments aren't missing
+    if cmd_opts.distributed_remotes is not None and len(cmd_opts.distributed_remotes) > 0:
+        for worker in cmd_opts.distributed_remotes:
+            world.add_worker(uuid=worker[0], address=worker[1], port=worker[2])
+    else:
+        logger.fatal(f"Found no worker info passed as arguments. Did you populate --distributed-remotes ?")
 
     def title(self):
         return "Distribute"
@@ -64,6 +68,7 @@ class Script(scripts.Script):
     @staticmethod
     def add_to_gallery(processed, p):
         """adds generated images to the image gallery after waiting for all workers to finish"""
+        webui_state.textinfo = "Distributed - injecting images"
 
         def processed_inject_image(image, info_index, iteration: int, save_path_override=None, grid=False, response=None):
             image_params: json = response["parameters"]

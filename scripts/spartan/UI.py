@@ -2,8 +2,9 @@ import os
 import subprocess
 from pathlib import Path
 import gradio
-from scripts.spartan.shared import logger
+from scripts.spartan.shared import logger, log_level
 from scripts.spartan.Worker import State
+from modules.shared import state as webui_state
 
 
 class UI:
@@ -45,6 +46,11 @@ class UI:
 
     def refresh_ckpts_btn(self):
         self.world.refresh_checkpoints()
+
+    def clear_queue_btn(self):
+        logger.debug(webui_state.__dict__)
+        webui_state.end()
+
 
     def status_btn(self):
         worker_status = ''
@@ -103,6 +109,11 @@ class UI:
                     redo_benchmarks_btn = gradio.Button(value='Redo benchmarks', variant='stop')
                     redo_benchmarks_btn.style(full_width=False)
                     redo_benchmarks_btn.click(self.benchmark_btn, inputs=[], outputs=[])
+
+                    if log_level == 'DEBUG':
+                        clear_queue_btn = gradio.Button(value='Clear local webui queue', variant='stop')
+                        clear_queue_btn.style(full_width=False)
+                        clear_queue_btn.click(self.clear_queue_btn)
 
                 with gradio.Tab('Settings'):
                     thin_client_cbx = gradio.Checkbox(

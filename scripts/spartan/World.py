@@ -170,7 +170,7 @@ class World:
         """
         Attempts to benchmark all workers a part of the world.
         """
-        global benchmark_payload
+        from scripts.spartan.shared import benchmark_payload
 
         workers_info: dict = {}
         saved: bool = os.path.exists(self.worker_info_path)
@@ -178,11 +178,18 @@ class World:
         benchmark_threads = []
 
         def benchmark_wrapped(worker):
+            logger.critical(f"benchmark payload is: {benchmark_payload}")
             bench_func = worker.benchmark if not worker.master else self.benchmark_master
             worker.avg_ipm = bench_func()
             worker.benchmarked = True
 
         if rebenchmark:
+            if saved:
+                with open(self.worker_info_path, 'r') as worker_info_file:
+                    workers_info = json.load(worker_info_file)
+                    benchmark_payload = workers_info['benchmark_payload']
+                    logger.info(f"Using saved benchmark config:\n{benchmark_payload}")
+
             saved = False
             workers = self.get_workers()
 
@@ -194,6 +201,8 @@ class World:
             with open(self.worker_info_path, 'r') as worker_info_file:
                 try:
                     workers_info = json.load(worker_info_file)
+                    benchmark_payload = workers_info['benchmark_payload']
+                    logger.info(f"Using saved benchmark config:\n{benchmark_payload}")
                 except json.JSONDecodeError:
                     logger.error(f"workers.json is not valid JSON, regenerating")
                     rebenchmark = True
@@ -236,7 +245,6 @@ class World:
                 json.dump(workers_info, worker_info_file, indent=3)
 
         logger.info(self.speed_summary())
-
 
     def get_current_output_size(self) -> int:
         """
