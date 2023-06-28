@@ -281,7 +281,7 @@ class Worker:
                     free_vram = int(memory_response['free']) / (1024 * 1024 * 1024)
                     total_vram = int(memory_response['total']) / (1024 * 1024 * 1024)
                     logger.debug(f"Worker '{self.uuid}' {free_vram:.2f}/{total_vram:.2f} GB VRAM free\n")
-                    self.free_vram = bytes(memory_response['free'])
+                    self.free_vram = memory_response['free']
                 except KeyError:
                     error = memory_response['cuda']['error']
                     logger.debug(f"CUDA doesn't seem to be available for worker '{self.uuid}'\nError: {error}")
