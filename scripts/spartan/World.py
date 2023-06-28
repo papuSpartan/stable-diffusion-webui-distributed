@@ -178,7 +178,6 @@ class World:
         benchmark_threads = []
 
         def benchmark_wrapped(worker):
-            logger.critical(f"benchmark payload is: {benchmark_payload}")
             bench_func = worker.benchmark if not worker.master else self.benchmark_master
             worker.avg_ipm = bench_func()
             worker.benchmarked = True
