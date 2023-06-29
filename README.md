@@ -27,6 +27,7 @@ Ie. if you're using sd-1.5 on the controlling instance, then the sd-1.5 model sh
 *if you want to sync models and etc. between a huge amount of nodes you might want to use something like rsync or winscp*
 
 # Usage Notes
+- This is not an **always on** script, you have to select it in the script dropdown of the tab you are in. This way, you can swap back to normal behavior mid-session if you so choose.
 - If benchmarking fails, try hitting the **Redo benchmark** button under the script's **Util** tab.
 - You need to have all of the workers you plan to use connected when benchmarking for things to work properly (will be fixed later).
 - If any remote is taking far too long to returns its share of the batch, you can hit the **Interrupt** button in the **Util** tab.
