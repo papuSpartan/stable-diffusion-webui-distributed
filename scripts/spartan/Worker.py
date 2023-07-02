@@ -10,13 +10,14 @@ from threading import Thread
 from webui import server_name
 from modules.shared import cmd_opts
 import gradio as gr
-from scripts.spartan.shared import benchmark_payload, logger, warmup_samples
+from scripts.spartan.shared import logger, warmup_samples
 from enum import Enum
 import json
 import base64
 import queue
 from modules.shared import state as master_state
 from modules.api.api import encode_pil_to_base64
+import scripts.spartan.shared as sh
 
 
 class InvalidWorkerResponse(Exception):
@@ -128,9 +129,6 @@ class Worker:
          Stores the payload used to benchmark the world and certain attributes of the worker.
          These things are used to draw certain conclusions after the first session.
 
-         Args:
-             benchmark_payload (dict): The payload used in the benchmark.
-
          Returns:
              dict: Worker info, including how it was benchmarked.
          """
@@ -209,7 +207,7 @@ class Worker:
         # if worker has not yet been benchmarked then
         eta = (num_images / self.avg_ipm) * 60
         # show effect of increased step size
-        real_steps_to_benched = steps / benchmark_payload['steps']
+        real_steps_to_benched = steps / sh.benchmark_payload['steps']
         eta = eta * real_steps_to_benched
 
         # show effect of high-res fix
@@ -219,7 +217,7 @@ class Worker:
 
         # show effect of image size
         real_pix_to_benched = (payload['width'] * payload['height'])\
-            / (benchmark_payload['width'] * benchmark_payload['height'])
+            / (sh.benchmark_payload['width'] * sh.benchmark_payload['height'])
         eta = eta * real_pix_to_benched
 
         # show effect of using a sampler other than euler a
@@ -431,7 +429,7 @@ class Worker:
                 float: Images per minute
             """
 
-            return benchmark_payload['batch_size'] / (seconds / 60)
+            return sh.benchmark_payload['batch_size'] / (seconds / 60)
 
         results: List[float] = []
         # it's seems to be lower for the first couple of generations
@@ -442,7 +440,7 @@ class Worker:
                 self.response = None
                 return 0
 
-            t = Thread(target=self.request, args=(benchmark_payload, None, False,), name=f"{self.uuid}_benchmark_request")
+            t = Thread(target=self.request, args=(sh.benchmark_payload, None, False,), name=f"{self.uuid}_benchmark_request")
             try:  # if the worker is unreachable/offline then handle that here
                 t.start()
                 start = time.time()

@@ -17,7 +17,8 @@ from pathlib import Path
 from modules.processing import process_images, StableDiffusionProcessingTxt2Img
 import modules.shared as shared
 from scripts.spartan.Worker import Worker, State
-from scripts.spartan.shared import logger, warmup_samples, benchmark_payload
+from scripts.spartan.shared import logger, warmup_samples
+import scripts.spartan.shared as sh
 
 
 class NotBenchmarked(Exception):
@@ -170,7 +171,6 @@ class World:
         """
         Attempts to benchmark all workers a part of the world.
         """
-        from scripts.spartan.shared import benchmark_payload
 
         workers_info: dict = {}
         saved: bool = os.path.exists(self.worker_info_path)
@@ -186,8 +186,8 @@ class World:
             if saved:
                 with open(self.worker_info_path, 'r') as worker_info_file:
                     workers_info = json.load(worker_info_file)
-                    benchmark_payload = workers_info['benchmark_payload']
-                    logger.info(f"Using saved benchmark config:\n{benchmark_payload}")
+                    sh.benchmark_payload = workers_info['benchmark_payload']
+                    logger.info(f"Using saved benchmark config:\n{sh.benchmark_payload}")
 
             saved = False
             workers = self.get_workers()
@@ -200,8 +200,8 @@ class World:
             with open(self.worker_info_path, 'r') as worker_info_file:
                 try:
                     workers_info = json.load(worker_info_file)
-                    benchmark_payload = workers_info['benchmark_payload']
-                    logger.info(f"Using saved benchmark config:\n{benchmark_payload}")
+                    sh.benchmark_payload = workers_info['benchmark_payload']
+                    logger.info(f"Using saved benchmark config:\n{sh.benchmark_payload}")
                 except json.JSONDecodeError:
                     logger.error(f"workers.json is not valid JSON, regenerating")
                     rebenchmark = True
@@ -238,7 +238,7 @@ class World:
 
                 for worker in unbenched_workers:
                     workers_info.update(worker.info())
-                workers_info.update({'benchmark_payload': benchmark_payload})
+                workers_info.update({'benchmark_payload': sh.benchmark_payload})
 
                 # save benchmark results to workers.json
                 json.dump(workers_info, worker_info_file, indent=3)
@@ -348,8 +348,8 @@ class World:
 
         # wrap our benchmark payload
         master_bench_payload = StableDiffusionProcessingTxt2Img()
-        for key in benchmark_payload:
-            setattr(master_bench_payload, key, benchmark_payload[key])
+        for key in sh.benchmark_payload:
+            setattr(master_bench_payload, key, sh.benchmark_payload[key])
         # Keeps from trying to save the images when we don't know the path. Also, there's not really any reason to.
         master_bench_payload.do_not_save_samples = True
 
@@ -362,7 +362,7 @@ class World:
         process_images(master_bench_payload)
         elapsed = time.time() - start
 
-        ipm = benchmark_payload['batch_size'] / (elapsed / 60)
+        ipm = sh.benchmark_payload['batch_size'] / (elapsed / 60)
 
         logger.debug(f"Master benchmark took {elapsed:.2f}: {ipm:.2f} ipm")
         self.master().benchmarked = True

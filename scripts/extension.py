@@ -159,7 +159,7 @@ class Script(scripts.Script):
             try:
                 images: json = job.worker.response["images"]
                 # if we for some reason get more than we asked for
-                if job.batch_size < len(images):
+                if (job.batch_size * p.n_iter) < len(images):
                     logger.debug(f"Requested {job.batch_size} images from '{job.worker.uuid}', got {len(images)}")
 
                 if donor_worker is None:
