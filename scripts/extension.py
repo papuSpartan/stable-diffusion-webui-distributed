@@ -54,6 +54,8 @@ class Script(scripts.Script):
     else:
         logger.fatal(f"Found no worker info passed as arguments. Did you populate --distributed-remotes ?")
 
+    world.load_config()
+
     def title(self):
         return "Distribute"
 
@@ -110,7 +112,7 @@ class Script(scripts.Script):
             if p.n_iter > 1:  # if splitting by batch count
                 num_remote_images *= p.n_iter - 1
 
-            logger.debug(f"iteration {iteration}/{p.n_iter}, image {true_image_pos + 1}/{Script.world.total_batch_size * p.n_iter}, info-index: {info_index}")
+            logger.debug(f"image {true_image_pos + 1}/{Script.world.total_batch_size * p.n_iter}, info-index: {info_index}")
 
             if Script.world.thin_client_mode:
                 p.all_negative_prompts = processed.all_negative_prompts
@@ -233,10 +235,6 @@ class Script(scripts.Script):
     # runs every time the generate button is hit
     def run(self, p, *args):
         current_thread().name = "distributed_main"
-
-        if cmd_opts.distributed_remotes is None:
-            raise RuntimeError("Distributed - No remotes passed. (Try using `--distributed-remotes`?)")
-
         Script.initialize(initial_payload=p)
 
         # strip scripts that aren't yet supported and warn user

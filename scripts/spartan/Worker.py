@@ -44,8 +44,6 @@ class Worker:
             avg_ipm (int): The average images per minute of the node. Defaults to None.
             uuid (str): The unique identifier/name of the worker node. Defaults to None.
             queried (bool): Whether this worker's memory status has been polled yet. Defaults to False.
-            free_vram (bytes): The amount of (currently) available VRAM on the worker node. Defaults to 0.
-            # TODO check this
             verify_remotes (bool): Whether to verify the validity of remote worker certificates. Defaults to False.
             master (bool): Whether this worker is the master node. Defaults to False.
             benchmarked (bool): Whether this worker has been benchmarked. Defaults to False.
@@ -60,7 +58,6 @@ class Worker:
     avg_ipm: float = None
     uuid: str = None
     queried: bool = False  # whether this worker has been connected to yet
-    free_vram: bytes = 0
     verify_remotes: bool = False
     master: bool = False
     benchmarked: bool = False
@@ -70,6 +67,7 @@ class Worker:
     loaded_model: str = None
     loaded_vae: str = None
     state: State = None
+    tls: bool = False
 
     # Percentages representing (roughly) how much faster a given sampler is in comparison to Euler A.
     # We compare to euler a because that is what we currently benchmark each node with.
@@ -95,7 +93,7 @@ class Worker:
     }
 
     def __init__(self, address: str = None, port: int = None, uuid: str = None, verify_remotes: bool = None,
-                 master: bool = False):
+                 master: bool = False, tls: bool = False):
         if master is True:
             self.master = master
             self.uuid = 'master'
@@ -125,18 +123,14 @@ class Worker:
         return f"{self.address}:{self.port}"
 
     def info(self) -> dict:
-        """
-         Stores the payload used to benchmark the world and certain attributes of the worker.
-         These things are used to draw certain conclusions after the first session.
-
-         Returns:
-             dict: Worker info, including how it was benchmarked.
-         """
-
         d = {}
         data = {
             "avg_ipm": self.avg_ipm,
             "master": self.master,
+            "address": self.address,
+            "port": self.port,
+            "last_mpe": self.last_mpe,
+            "tls": self.tls
         }
 
         d[self.uuid] = data
@@ -169,8 +163,8 @@ class Worker:
             str: The full url.
         """
 
-        # TODO check if using http or https
-        return f"http://{self.__str__()}/sdapi/v1/{route}"
+        protocol = 'http' if not self.tls else 'https'
+        return f"{protocol}://{self.__str__()}/sdapi/v1/{route}"
 
     def batch_eta_hr(self, payload: dict) -> float:
         """

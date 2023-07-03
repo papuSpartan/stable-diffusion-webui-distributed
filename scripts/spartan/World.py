@@ -137,7 +137,7 @@ class World:
             if job.worker.master:
                 return job
 
-    def add_worker(self, uuid: str, address: str, port: int):
+    def add_worker(self, uuid: str, address: str, port: int, tls: bool = False):
         """
         Registers a worker with the world.
 
@@ -147,8 +147,14 @@ class World:
             port (int): The port number.
         """
 
-        worker = Worker(uuid=uuid, address=address, port=port, verify_remotes=self.verify_remotes)
+        worker = Worker(uuid=uuid, address=address, port=port, verify_remotes=self.verify_remotes, tls=tls)
+
+        for w in self.__workers:
+            if w.uuid == uuid:
+                self.__workers.remove(w)
         self.__workers.append(worker)
+
+        return worker
 
     def interrupt_remotes(self):
 
@@ -186,8 +192,11 @@ class World:
             if saved:
                 with open(self.worker_info_path, 'r') as worker_info_file:
                     workers_info = json.load(worker_info_file)
-                    sh.benchmark_payload = workers_info['benchmark_payload']
-                    logger.info(f"Using saved benchmark config:\n{sh.benchmark_payload}")
+                    try:
+                        sh.benchmark_payload = workers_info['benchmark_payload']
+                        logger.info(f"Using saved benchmark config:\n{sh.benchmark_payload}")
+                    except KeyError:
+                        logger.debug(f"using default benchmark payload")
 
             saved = False
             workers = self.get_workers()
@@ -211,10 +220,14 @@ class World:
         if saved and not rebenchmark:
             logger.debug(f"loaded saved configuration: \n{workers_info}")
 
-            for worker in self.get_workers():
+            for worker in self.__workers:
                 try:
                     worker.avg_ipm = workers_info[worker.uuid]['avg_ipm']
-                    worker.benchmarked = True
+                    if worker.avg_ipm <= 0:
+                        logger.debug(f"{worker.uuid} has recorded ipm of 0... marking as unbenched")
+                        unbenched_workers.append(worker)
+                    else:
+                        worker.benchmarked = True
                 except KeyError:
                     logger.debug(f"worker '{worker.uuid}' not found in workers.json")
                     unbenched_workers.append(worker)
@@ -491,3 +504,35 @@ class World:
             if self.jobs[last].batch_size < 1:
                 del self.jobs[last]
             last -= 1
+
+    def load_config(self):
+        if not os.path.exists(self.worker_info_path):
+            logger.debug(f"Config was not found at '{self.worker_info_path}'")
+            return
+
+        with open(self.worker_info_path, 'r') as config:
+
+            try:
+                config_json = json.load(config)
+            except json.decoder.JSONDecodeError:
+                logger.debug(f"config is corrupt or invalid JSON, unable to load")
+                return
+
+            for key in config_json:
+                if key == "benchmark_payload" or key == "master":
+                    continue
+
+                w = config_json[key]
+                try:
+                    worker = self.add_worker(
+                        uuid=key,
+                        address=w['address'],
+                        port=w['port'],
+                        tls=w['tls']
+                    )
+                    worker.address = w['address']
+                    worker.port = w['port']
+                    worker.last_mpe = w['last_mpe']
+                except KeyError:
+                    logger.error(f"invalid configuration in file for worker {key}... ignoring")
+                    continue

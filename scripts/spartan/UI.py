@@ -1,3 +1,4 @@
+import io
 import os
 import subprocess
 from pathlib import Path
@@ -5,6 +6,7 @@ import gradio
 from scripts.spartan.shared import logger, log_level
 from scripts.spartan.Worker import State
 from modules.shared import state as webui_state
+import json
 
 
 class UI:
@@ -41,12 +43,6 @@ class UI:
         logger.info("Redoing benchmarks...")
         self.world.benchmark(rebenchmark=True)
 
-    def interrupt_btn(self):
-        self.world.interrupt_remotes()
-
-    def refresh_ckpts_btn(self):
-        self.world.refresh_checkpoints()
-
     def clear_queue_btn(self):
         logger.debug(webui_state.__dict__)
         webui_state.end()
@@ -76,6 +72,25 @@ class UI:
         self.world.job_timeout = job_timeout
         logger.debug(f"job timeout is now {job_timeout} seconds")
 
+    def save_worker_btn(self, name, address, port, tls):
+        worker = self.world.add_worker(name, address, port, tls)
+
+        workers_info = {}
+        with open(self.world.worker_info_path, 'r', encoding='utf-8') as worker_info_file:
+            try:
+                workers_info = json.load(worker_info_file)
+            except json.decoder.JSONDecodeError:
+                logger.error(f"corrupt or invalid config file... ignoring")
+            except io.UnsupportedOperation:
+                pass
+
+        with open(self.world.worker_info_path, 'w', encoding='utf-8') as worker_info_file:
+            inf: dict = worker.info()
+            workers_info[name] = inf[name]
+
+            json.dump(workers_info, worker_info_file, indent=3)
+
+
     # end handlers
 
     def create_root(self):
@@ -96,24 +111,40 @@ class UI:
                 with gradio.Tab('Utils'):
                     refresh_checkpoints_btn = gradio.Button(value='Refresh checkpoints')
                     refresh_checkpoints_btn.style(full_width=False)
-                    refresh_checkpoints_btn.click(self.refresh_ckpts_btn, inputs=[], outputs=[])
+                    refresh_checkpoints_btn.click(self.world.refresh_checkpoints)
 
                     run_usr_btn = gradio.Button(value='Run user script')
                     run_usr_btn.style(full_width=False)
-                    run_usr_btn.click(self.user_script_btn, inputs=[], outputs=[])
+                    run_usr_btn.click(self.user_script_btn)
 
                     interrupt_all_btn = gradio.Button(value='Interrupt all', variant='stop')
                     interrupt_all_btn.style(full_width=False)
-                    interrupt_all_btn.click(self.interrupt_btn, inputs=[], outputs=[])
+                    interrupt_all_btn.click(self.world.interrupt_remotes)
 
                     redo_benchmarks_btn = gradio.Button(value='Redo benchmarks', variant='stop')
                     redo_benchmarks_btn.style(full_width=False)
                     redo_benchmarks_btn.click(self.benchmark_btn, inputs=[], outputs=[])
 
+                    reload_config_btn = gradio.Button(value='Reload config from file')
+                    reload_config_btn.style(full_width=False)
+                    reload_config_btn.click(self.world.load_config)
+
                     if log_level == 'DEBUG':
                         clear_queue_btn = gradio.Button(value='Clear local webui queue', variant='stop')
                         clear_queue_btn.style(full_width=False)
                         clear_queue_btn.click(self.clear_queue_btn)
+
+                with gradio.Tab('Worker Config'):
+                    worker_name_field = gradio.Textbox(label='Name')
+                    worker_address_field = gradio.Textbox(label='Address')
+                    worker_port_field = gradio.Textbox(label='Port', value='7860')
+                    worker_tls_cbx = gradio.Checkbox(
+                        label='connect to worker using https'
+                    )
+                    save_worker_btn = gradio.Button(
+                        value='Add Worker'
+                    )
+                    save_worker_btn.click(self.save_worker_btn, inputs=[worker_name_field, worker_address_field, worker_port_field, worker_tls_cbx])
 
                 with gradio.Tab('Settings'):
                     thin_client_cbx = gradio.Checkbox(
