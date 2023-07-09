@@ -137,6 +137,7 @@ class World:
             if job.worker.master:
                 return job
 
+    # TODO better way of merging/updating workers
     def add_worker(self, uuid: str, address: str, port: int, tls: bool = False):
         """
         Registers a worker with the world.
@@ -147,14 +148,22 @@ class World:
             port (int): The port number.
         """
 
-        worker = Worker(uuid=uuid, address=address, port=port, verify_remotes=self.verify_remotes, tls=tls)
+        original = None
+        new = Worker(uuid=uuid, address=address, port=port, verify_remotes=self.verify_remotes, tls=tls)
 
         for w in self._workers:
             if w.uuid == uuid:
-                self._workers.remove(w)
-        self._workers.append(worker)
+                original = w
 
-        return worker
+        if original is None:
+            self._workers.append(new)
+            return new
+        else:
+            original.address = address
+            original.port = port
+            original.tls = tls
+
+            return original
 
     def interrupt_remotes(self):
 
@@ -488,7 +497,7 @@ class World:
         iterations = payload['n_iter']
         distro_summary += f"{self.total_batch_size} * {iterations} iteration(s): {self.total_batch_size * iterations} images total\n"
         for job in self.jobs:
-            distro_summary += f"'{job.worker.uuid}' - {job.batch_size * iterations} images\n"
+            distro_summary += f"'{job.worker.uuid}' - {job.batch_size * iterations} image(s) @ {job.worker.avg_ipm:.2f} ipm\n"
         logger.info(distro_summary)
 
         # delete any jobs that have no work
@@ -515,7 +524,7 @@ class World:
 
         if config is not None:
             for key in config:
-                if key == "benchmark_payload" or key == "master":
+                if key == "benchmark_payload":
                     continue
 
                 w = config[key]
@@ -529,9 +538,12 @@ class World:
                     worker.address = w['address']
                     worker.port = w['port']
                     worker.last_mpe = w['last_mpe']
+                    worker.avg_ipm = w['avg_ipm']
+                    worker.master = w['master']
                 except KeyError:
                     logger.error(f"invalid configuration in file for worker {key}... ignoring")
                     continue
+        logger.debug("loaded config")
 
     def save_config(self):
         config = {}

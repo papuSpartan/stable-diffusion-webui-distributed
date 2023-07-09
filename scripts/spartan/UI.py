@@ -115,6 +115,14 @@ class UI:
 
         return [gradio.Textbox.update(value=selected_worker.address), gradio.Textbox.update(value=selected_worker.port), gradio.Checkbox.update(value=selected_worker.tls)]
 
+
+    def reconnect_remotes(self):
+        workers = self.world.get_workers()
+        for worker in workers:
+            if worker.state == State.UNAVAILABLE and worker.reachable():
+                logger.info(f"Worker '{worker.uuid}' is now online, marking as available")
+                worker.state = State.IDLE
+
     # end handlers
 
     def create_root(self):
@@ -152,6 +160,10 @@ class UI:
                     reload_config_btn = gradio.Button(value='Reload config from file')
                     reload_config_btn.style(full_width=False)
                     reload_config_btn.click(self.world.load_config)
+
+                    reconnect_lost_workers_btn = gradio.Button(value='Attempt reconnection with remotes')
+                    reconnect_lost_workers_btn.style(full_width=False)
+                    reconnect_lost_workers_btn.click(self.reconnect_remotes)
 
                     if log_level == 'DEBUG':
                         clear_queue_btn = gradio.Button(value='Clear local webui queue', variant='stop')
