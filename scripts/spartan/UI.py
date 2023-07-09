@@ -107,6 +107,14 @@ class UI:
         labels = [x.uuid for x in self.selectable_remote_workers()]
         return gradio.Dropdown.update(choices=labels)
 
+    def populate_worker_config_from_selection(self, selection):
+        selected_worker: Worker = None
+        for worker in self.world.get_workers():
+            if worker.uuid == selection:
+                selected_worker = worker
+
+        return [gradio.Textbox.update(value=selected_worker.address), gradio.Textbox.update(value=selected_worker.port), gradio.Checkbox.update(value=selected_worker.tls)]
+
     # end handlers
 
     def create_root(self):
@@ -159,11 +167,12 @@ class UI:
                         label='Label',
                         allow_custom_value=True
                     )
-                    worker_address_field = gradio.Textbox(label='Address')
-                    worker_port_field = gradio.Textbox(label='Port', value='7860')
+                    worker_address_field = gradio.Textbox(label='Address', placeholder='localhost')
+                    worker_port_field = gradio.Textbox(label='Port', placeholder='7860')
                     worker_tls_cbx = gradio.Checkbox(
-                        label='connect to worker using https'
+                        label='connect using https'
                     )
+                    worker_select_dropdown.select(self.populate_worker_config_from_selection, inputs=worker_select_dropdown, outputs=[worker_address_field, worker_port_field, worker_tls_cbx])
 
                     with gradio.Row():
                         save_worker_btn = gradio.Button(value='Add/Update Worker')
