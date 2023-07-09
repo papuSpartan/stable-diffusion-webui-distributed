@@ -97,8 +97,6 @@ class Worker:
         if master is True:
             self.master = master
             self.uuid = 'master'
-            # set to a sentinel value to avoid issues with speed comparisons
-            # self.avg_ipm = 0
 
             # right now this is really only for clarity while debugging:
             self.address = server_name
@@ -115,6 +113,7 @@ class Worker:
         self.loaded_model = ''
         self.loaded_vae = ''
         self.state = State.IDLE
+        self.tls = tls
 
         if uuid is not None:
             self.uuid = uuid

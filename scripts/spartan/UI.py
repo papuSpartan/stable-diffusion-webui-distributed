@@ -172,7 +172,11 @@ class UI:
                     worker_tls_cbx = gradio.Checkbox(
                         label='connect using https'
                     )
-                    worker_select_dropdown.select(self.populate_worker_config_from_selection, inputs=worker_select_dropdown, outputs=[worker_address_field, worker_port_field, worker_tls_cbx])
+                    worker_select_dropdown.select(
+                        self.populate_worker_config_from_selection,
+                        inputs=worker_select_dropdown,
+                        outputs=[worker_address_field, worker_port_field, worker_tls_cbx]
+                    )
 
                     with gradio.Row():
                         save_worker_btn = gradio.Button(value='Add/Update Worker')
