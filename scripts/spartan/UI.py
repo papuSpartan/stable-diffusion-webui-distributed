@@ -4,12 +4,15 @@ import subprocess
 from pathlib import Path
 import gradio
 from scripts.spartan.shared import logger, log_level
-from scripts.spartan.Worker import State
+from scripts.spartan.Worker import State, Worker
 from modules.shared import state as webui_state
 import json
+from typing import List
 
+worker_select_dropdown = None
 
 class UI:
+
     def __init__(self, script, world):
         self.script = script
         self.world = world
@@ -73,23 +76,36 @@ class UI:
         logger.debug(f"job timeout is now {job_timeout} seconds")
 
     def save_worker_btn(self, name, address, port, tls):
-        worker = self.world.add_worker(name, address, port, tls)
+        self.world.add_worker(name, address, port, tls)
+        self.world.save_config()
 
-        workers_info = {}
-        with open(self.world.worker_info_path, 'r', encoding='utf-8') as worker_info_file:
-            try:
-                workers_info = json.load(worker_info_file)
-            except json.decoder.JSONDecodeError:
-                logger.error(f"corrupt or invalid config file... ignoring")
-            except io.UnsupportedOperation:
-                pass
+        # visibly update which workers can be selected
+        labels = [x.uuid for x in self.selectable_remote_workers()]
+        return gradio.Dropdown.update(choices=labels)
 
-        with open(self.world.worker_info_path, 'w', encoding='utf-8') as worker_info_file:
-            inf: dict = worker.info()
-            workers_info[name] = inf[name]
+    def selectable_remote_workers(self) -> List[Worker]:
+        remote_workers = []
 
-            json.dump(workers_info, worker_info_file, indent=3)
+        for worker in self.world.get_workers():
+            if worker.master:
+                continue
+            remote_workers.append(worker)
+        remote_workers = sorted(remote_workers, key=lambda x: x.uuid)
 
+        return remote_workers
+
+    def remove_worker_btn(self, worker_label):
+        # remove worker from memory
+        for worker in self.world._workers:
+            if worker.uuid == worker_label:
+                self.world._workers.remove(worker)
+
+        # remove worker from disk
+        self.world.save_config()
+
+        # visibly update which workers can be selected
+        labels = [x.uuid for x in self.selectable_remote_workers()]
+        return gradio.Dropdown.update(choices=labels)
 
     # end handlers
 
@@ -135,16 +151,25 @@ class UI:
                         clear_queue_btn.click(self.clear_queue_btn)
 
                 with gradio.Tab('Worker Config'):
-                    worker_name_field = gradio.Textbox(label='Name')
+                    worker_select_dropdown = None
+
+                    worker_select_dropdown = gradio.Dropdown(
+                    [x.uuid for x in self.selectable_remote_workers()],
+                        info='Select a pre-existing worker or enter a label for a new one',
+                        label='Label',
+                        allow_custom_value=True
+                    )
                     worker_address_field = gradio.Textbox(label='Address')
                     worker_port_field = gradio.Textbox(label='Port', value='7860')
                     worker_tls_cbx = gradio.Checkbox(
                         label='connect to worker using https'
                     )
-                    save_worker_btn = gradio.Button(
-                        value='Add Worker'
-                    )
-                    save_worker_btn.click(self.save_worker_btn, inputs=[worker_name_field, worker_address_field, worker_port_field, worker_tls_cbx])
+
+                    with gradio.Row():
+                        save_worker_btn = gradio.Button(value='Add/Update Worker')
+                        save_worker_btn.click(self.save_worker_btn, inputs=[worker_select_dropdown, worker_address_field, worker_port_field, worker_tls_cbx], outputs=[worker_select_dropdown])
+                        remove_worker_btn = gradio.Button(value='Remove Worker', variant='stop')
+                        remove_worker_btn.click(self.remove_worker_btn, inputs=worker_select_dropdown, outputs=[worker_select_dropdown])
 
                 with gradio.Tab('Settings'):
                     thin_client_cbx = gradio.Checkbox(
