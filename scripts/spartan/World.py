@@ -69,8 +69,8 @@ class World:
     """
 
     # I'd rather keep the sdwui root directory clean.
-    this_extension_path = Path(abspath(getsourcefile(lambda: 0))).parent.parent.parent
-    worker_info_path = this_extension_path.joinpath('workers.json')
+    extension_path = Path(abspath(getsourcefile(lambda: 0))).parent.parent.parent
+    config_path = extension_path.joinpath('config.json')
 
     def __init__(self, initial_payload, verify_remotes: bool = True):
         self.master_worker = Worker(master=True)
@@ -187,8 +187,6 @@ class World:
         Attempts to benchmark all workers a part of the world.
         """
 
-        workers_info: dict = {}
-        saved: bool = os.path.exists(self.worker_info_path)
         unbenched_workers = []
         benchmark_threads = []
 
@@ -198,50 +196,18 @@ class World:
             worker.benchmarked = True
 
         if rebenchmark:
-            if saved:
-                with open(self.worker_info_path, 'r') as worker_info_file:
-                    workers_info = json.load(worker_info_file)
-                    try:
-                        sh.benchmark_payload = workers_info['benchmark_payload']
-                        logger.info(f"Using saved benchmark config:\n{sh.benchmark_payload}")
-                    except KeyError:
-                        logger.debug(f"using default benchmark payload")
-
-            saved = False
-            workers = self.get_workers()
-
-            for worker in workers:
+            for worker in self._workers:
                 worker.benchmarked = False
-            unbenched_workers = workers
-
-        if saved:
-            with open(self.worker_info_path, 'r') as worker_info_file:
-                try:
-                    workers_info = json.load(worker_info_file)
-                    sh.benchmark_payload = workers_info['benchmark_payload']
-                    logger.info(f"Using saved benchmark config:\n{sh.benchmark_payload}")
-                except json.JSONDecodeError:
-                    logger.error(f"workers.json is not valid JSON, regenerating")
-                    rebenchmark = True
-                    unbenched_workers = self.get_workers()
-
-        # load stats for any workers that have already been benched
-        if saved and not rebenchmark:
-            logger.debug(f"loaded saved configuration: \n{workers_info}")
+            unbenched_workers = self._workers
+        else:
+            self.load_config()
 
             for worker in self._workers:
-                try:
-                    worker.avg_ipm = workers_info[worker.uuid]['avg_ipm']
-                    if worker.avg_ipm is None or worker.avg_ipm <= 0:
-                        logger.debug(f"{worker.uuid} recorded ipm is invalid... marking as unbenched")
-                        unbenched_workers.append(worker)
-                    else:
-                        worker.benchmarked = True
-                except KeyError:
-                    logger.debug(f"worker '{worker.uuid}' not found in workers.json")
+                if worker.avg_ipm is None or worker.avg_ipm <= 0:
+                    logger.debug(f"recorded speed for worker '{worker.uuid}' is invalid")
                     unbenched_workers.append(worker)
-        else:
-            unbenched_workers = self.get_workers()
+                else:
+                    worker.benchmarked = True
 
         # benchmark those that haven't been
         for worker in unbenched_workers:
@@ -391,6 +357,9 @@ class World:
 
         batch_size = self.default_batch_size()
         for worker in self.get_workers():
+            if worker.avg_ipm is None or worker.avg_ipm <= 0:
+                logger.debug(f"No recorded speed for worker '{worker.uuid}, benchmarking'")
+                worker.benchmark()
             self.jobs.append(Job(worker=worker, batch_size=batch_size))
 
     def get_workers(self):
@@ -508,11 +477,11 @@ class World:
             last -= 1
 
     def config(self) -> json:
-        if not os.path.exists(self.worker_info_path):
-            logger.debug(f"Config was not found at '{self.worker_info_path}'")
+        if not os.path.exists(self.config_path):
+            logger.debug(f"Config was not found at '{self.config_path}'")
             return
 
-        with open(self.worker_info_path, 'r') as config:
+        with open(self.config_path, 'r') as config:
 
             try:
                 return json.load(config)
@@ -523,14 +492,12 @@ class World:
         config = self.config()
 
         if config is not None:
-            for key in config:
-                if key == "benchmark_payload":
-                    continue
-
-                w = config[key]
+            for worker_dict in config['workers']:
+                label = next(iter(worker_dict))
+                w = worker_dict[label]
                 try:
                     worker = self.add_worker(
-                        uuid=key,
+                        uuid=label,
                         address=w['address'],
                         port=w['port'],
                         tls=w['tls']
@@ -540,19 +507,22 @@ class World:
                     worker.last_mpe = w['last_mpe']
                     worker.avg_ipm = w['avg_ipm']
                     worker.master = w['master']
-                except KeyError:
-                    logger.error(f"invalid configuration in file for worker {key}... ignoring")
+                except KeyError as e:
+                    raise e
+                    logger.error(f"invalid configuration in file for worker {w}... ignoring")
                     continue
         logger.debug("loaded config")
 
     def save_config(self):
-        config = {}
+        config = {
+            'workers': [],
+            'benchmark_payload': sh.benchmark_payload
+        }
 
-        config.update({'benchmark_payload': sh.benchmark_payload})
         for worker in self._workers:
-            config.update(worker.info())
+            config['workers'].append(worker.info())
 
-        with open(self.worker_info_path, 'w+') as worker_info_file:
-            json.dump(config, worker_info_file, indent=3)
+        with open(self.config_path, 'w+') as config_file:
+            json.dump(config, config_file, indent=3)
             logger.debug(f"config saved")
 
