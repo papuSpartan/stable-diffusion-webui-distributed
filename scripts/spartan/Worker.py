@@ -392,7 +392,7 @@ class Worker:
                 else:
                     raise InvalidWorkerResponse(e)
 
-        except requests.exceptions.ConnectionError:
+        except requests.RequestException:
             self.mark_unreachable()
             return
 

@@ -117,11 +117,16 @@ class UI:
 
 
     def reconnect_remotes(self):
-        workers = self.world.get_workers()
-        for worker in workers:
-            if worker.state == State.UNAVAILABLE and worker.reachable():
-                logger.info(f"Worker '{worker.uuid}' is now online, marking as available")
-                worker.state = State.IDLE
+        for worker in self.world._workers:
+            logger.debug(f"checking if worker '{worker.uuid}' is now reachable...")
+            reachable = worker.reachable()
+            if worker.state == State.UNAVAILABLE:
+                if reachable:
+                    logger.info(f"worker '{worker.uuid}' is now online, marking as available")
+                    worker.state = State.IDLE
+                else:
+                    logger.info(f"worker '{worker.uuid}' is still unreachable")
+
 
     # end handlers
 
