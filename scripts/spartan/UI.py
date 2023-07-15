@@ -1,6 +1,7 @@
 import io
 import os
 import subprocess
+import threading
 from pathlib import Path
 import gradio
 from scripts.spartan.shared import logger, log_level
@@ -8,6 +9,7 @@ from scripts.spartan.Worker import State, Worker
 from modules.shared import state as webui_state
 import json
 from typing import List
+from threading import Thread
 
 worker_select_dropdown = None
 
@@ -113,7 +115,15 @@ class UI:
             if worker.uuid == selection:
                 selected_worker = worker
 
-        return [gradio.Textbox.update(value=selected_worker.address), gradio.Textbox.update(value=selected_worker.port), gradio.Checkbox.update(value=selected_worker.tls)]
+        avail_models = selected_worker.available_models()
+        avail_models.append('None')  # for disabling override
+
+        return [
+            gradio.Textbox.update(value=selected_worker.address),
+            gradio.Textbox.update(value=selected_worker.port),
+            gradio.Checkbox.update(value=selected_worker.tls),
+            gradio.Dropdown.update(choices=avail_models)
+        ]
 
 
     def reconnect_remotes(self):
@@ -126,6 +136,17 @@ class UI:
                     worker.state = State.IDLE
                 else:
                     logger.info(f"worker '{worker.uuid}' is still unreachable")
+
+    def override_worker_model(self, model, worker_label):
+        worker = self.world.worker_from_label(worker_label)
+
+        if model == "None":
+            worker.model_override = None
+        else:
+            worker.model_override = model
+
+            # set model on remote early
+            Thread(target=worker.load_options, args=(model,)).start()
 
 
     # end handlers
@@ -176,8 +197,6 @@ class UI:
                         clear_queue_btn.click(self.clear_queue_btn)
 
                 with gradio.Tab('Worker Config'):
-                    worker_select_dropdown = None
-
                     worker_select_dropdown = gradio.Dropdown(
                     [x.uuid for x in self.selectable_remote_workers()],
                         info='Select a pre-existing worker or enter a label for a new one',
@@ -189,17 +208,22 @@ class UI:
                     worker_tls_cbx = gradio.Checkbox(
                         label='connect using https'
                     )
-                    worker_select_dropdown.select(
-                        self.populate_worker_config_from_selection,
-                        inputs=worker_select_dropdown,
-                        outputs=[worker_address_field, worker_port_field, worker_tls_cbx]
-                    )
+
+                    with gradio.Accordion(label='Advanced'):
+                        model_override_dropdown = gradio.Dropdown(label='Model override')
+                        model_override_dropdown.select(self.override_worker_model, inputs=[model_override_dropdown, worker_select_dropdown])
 
                     with gradio.Row():
                         save_worker_btn = gradio.Button(value='Add/Update Worker')
                         save_worker_btn.click(self.save_worker_btn, inputs=[worker_select_dropdown, worker_address_field, worker_port_field, worker_tls_cbx], outputs=[worker_select_dropdown])
                         remove_worker_btn = gradio.Button(value='Remove Worker', variant='stop')
                         remove_worker_btn.click(self.remove_worker_btn, inputs=worker_select_dropdown, outputs=[worker_select_dropdown])
+
+                    worker_select_dropdown.select(
+                        self.populate_worker_config_from_selection,
+                        inputs=worker_select_dropdown,
+                        outputs=[worker_address_field, worker_port_field, worker_tls_cbx, model_override_dropdown]
+                    )
 
                 with gradio.Tab('Settings'):
                     thin_client_cbx = gradio.Checkbox(

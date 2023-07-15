@@ -18,6 +18,7 @@ import queue
 from modules.shared import state as master_state
 from modules.api.api import encode_pil_to_base64
 import scripts.spartan.shared as sh
+import re
 
 
 class InvalidWorkerResponse(Exception):
@@ -114,6 +115,7 @@ class Worker:
         self.loaded_vae = ''
         self.state = State.IDLE
         self.tls = tls
+        self.model_override: str = None
 
         if uuid is not None:
             self.uuid = uuid
@@ -278,11 +280,11 @@ class Worker:
                     logger.debug(f"CUDA doesn't seem to be available for worker '{self.uuid}'\nError: {error}")
 
             if sync_options is True:
-                options_response = requests.post(
-                    self.full_url("options"),
-                    json=option_payload,
-                    verify=self.verify_remotes
-                )
+                model = option_payload['sd_model_checkpoint']
+                if self.model_override is not None:
+                    model = self.model_override
+
+                self.load_options(model=model, vae=option_payload['sd_vae'])
                 # TODO api returns 200 even if it fails to successfully set the checkpoint so we will have to make a
                 #  second GET to see if everything loaded...
 
@@ -517,3 +519,34 @@ class Worker:
     def mark_unreachable(self):
         logger.error(f"Worker '{self.uuid}' at {self} was unreachable, will avoid in future")
         self.state = State.UNAVAILABLE
+
+    def available_models(self) -> List[str]:
+        response = requests.get(
+            url=self.full_url('sd-models'),
+            verify=self.verify_remotes
+        )
+
+        titles = [model['title'] for model in response.json()]
+        return titles
+
+    def load_options(self, model, vae=None):
+        model_name = re.sub(r'\s?\[[^\]]*\]$', '', model)
+        payload = {
+            "sd_model_checkpoint": model_name
+        }
+        if vae is not None:
+            payload['sd_vae'] = vae
+
+        response = requests.post(
+            self.full_url("options"),
+            json=payload,
+            verify=self.verify_remotes
+        )
+
+        if response.status_code != 200:
+            logger.debug(f"failed to load options for worker '{self.uuid}'")
+        else:
+            self.loaded_model = model_name
+            if vae is not None:
+                self.loaded_vae = vae
+

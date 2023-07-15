@@ -526,3 +526,8 @@ class World:
             json.dump(config, config_file, indent=3)
             logger.debug(f"config saved")
 
+
+    def worker_from_label(self, label: str) -> Worker:
+        for worker in self._workers:
+            if worker.uuid == label:
+                return worker
