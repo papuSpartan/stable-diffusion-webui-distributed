@@ -117,15 +117,7 @@ class Script(scripts.Script):
             if Script.world.thin_client_mode:
                 p.all_negative_prompts = processed.all_negative_prompts
 
-            info_text = processing.create_infotext(
-                p=p,
-                all_prompts=processed.all_prompts,
-                all_seeds=processed.all_seeds,
-                all_subseeds=processed.all_subseeds,
-                # comments=[""], # unimplemented upstream :(
-                position_in_batch=true_image_pos if not grid else 0,
-                iteration=0
-            )
+            info_text = image_info_post['infotexts'][i]
             processed.infotexts.append(info_text)
 
             # automatically save received image to local disk if desired
