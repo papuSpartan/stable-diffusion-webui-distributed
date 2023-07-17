@@ -39,6 +39,7 @@ class Script(scripts.Script):
     first_run = True
     master_start = None
     runs_since_init = 0
+    name = "distributed"
 
     if verify_remotes is False:
         logger.warning(f"You have chosen to forego the verification of worker TLS certificates")
@@ -65,7 +66,10 @@ class Script(scripts.Script):
 
     def ui(self, is_img2img):
         extension_ui = UI(script=Script, world=Script.world)
-        extension_ui.create_root()
+        root, api_exposed = extension_ui.create_ui()
+
+        # return some components that should be exposed to the api
+        return api_exposed
 
     @staticmethod
     def add_to_gallery(processed, p):
@@ -336,7 +340,7 @@ class Script(scripts.Script):
             processed.infotexts = []
             processed.prompt = None
         else:
-            processed = processing.process_images(p, *args)
+            processed = processing.process_images(p)
 
         Script.add_to_gallery(processed, p)
         Script.runs_since_init += 1

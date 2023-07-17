@@ -151,7 +151,7 @@ class UI:
 
     # end handlers
 
-    def create_root(self):
+    def create_ui(self):
         with gradio.Box() as root:
             with gradio.Accordion(label='Distributed', open=False):
                 with gradio.Tab('Status') as status_tab:
@@ -248,4 +248,4 @@ class UI:
                         """
                     )
 
-            return root
+            return root, [thin_client_cbx, job_timeout]
