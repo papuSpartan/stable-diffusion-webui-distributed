@@ -9,15 +9,15 @@ import copy
 import json
 import os
 import time
-from typing import List
+from typing import List, Union
 from threading import Thread
 from inspect import getsourcefile
 from os.path import abspath
 from pathlib import Path
 from modules.processing import process_images, StableDiffusionProcessingTxt2Img
 import modules.shared as shared
-from scripts.spartan.Worker import Worker, State
-from scripts.spartan.shared import logger, warmup_samples
+from scripts.spartan.Worker import InvalidWorkerResponse, Worker, State
+from scripts.spartan.shared import logger, warmup_samples, benchmark_payload
 import scripts.spartan.shared as sh
 
 
@@ -70,7 +70,7 @@ class World:
 
     # I'd rather keep the sdwui root directory clean.
     extension_path = Path(abspath(getsourcefile(lambda: 0))).parent.parent.parent
-    config_path = extension_path.joinpath('config.json')
+    config_path = shared.cmd_opts.distributed_config
 
     def __init__(self, initial_payload, verify_remotes: bool = True):
         self.master_worker = Worker(master=True)
@@ -82,6 +82,7 @@ class World:
         self.verify_remotes = verify_remotes
         self.initial_payload = copy.copy(initial_payload)
         self.thin_client_mode = False
+        self.has_any_workers = False # whether any workers have been added to the world
 
     def __getitem__(self, label: str) -> Worker:
         for worker in self._workers:
@@ -141,9 +142,11 @@ class World:
         for job in self.jobs:
             if job.worker.master:
                 return job
+        
+        raise Exception("Master job not found")
 
     # TODO better way of merging/updating workers
-    def add_worker(self, uuid: str, address: str, port: int, tls: bool = False):
+    def add_worker(self, uuid: str, address: str, port: int, auth: Union[str,None] = None, tls: bool = False):
         """
         Registers a worker with the world.
 
@@ -151,10 +154,15 @@ class World:
             uuid (str): The name or unique identifier.
             address (str): The ip or FQDN.
             port (int): The port number.
+        
+        Returns:
+            Worker: The worker object.
+        
+        Raises:
+            InvalidWorkerResponse: If the worker is not valid.
         """
-
         original = None
-        new = Worker(uuid=uuid, address=address, port=port, verify_remotes=self.verify_remotes, tls=tls)
+        new = Worker(uuid=uuid, address=address, port=port, verify_remotes=self.verify_remotes, tls=tls, auth=auth)
 
         for w in self._workers:
             if w.uuid == uuid:
@@ -162,6 +170,7 @@ class World:
 
         if original is None:
             self._workers.append(new)
+            self.has_any_workers = True
             return new
         else:
             original.address = address
@@ -169,7 +178,6 @@ class World:
             original.tls = tls
 
             return original
-
     def interrupt_remotes(self):
 
         for worker in self.get_workers():
@@ -368,8 +376,8 @@ class World:
             self.jobs.append(Job(worker=worker, batch_size=batch_size))
 
     def get_workers(self):
-        filtered = []
-        for worker in self._workers:
+        filtered:List[Worker] = []
+        for worker in self.__workers:
             if worker.avg_ipm is not None and worker.avg_ipm <= 0:
                 logger.warning(f"config reports invalid speed (0 ipm) for worker '{worker.uuid}', setting default of 1 ipm.\nplease re-benchmark")
                 worker.avg_ipm = 1
@@ -504,17 +512,20 @@ class World:
                     worker = self.add_worker(
                         uuid=label,
                         address=w['address'],
-                        port=w['port'],
-                        tls=w['tls']
+                        port=w.get('port', 80),
+                        tls=w.get('tls', False),
+                        auth =w.get('auth', None)
                     )
                     worker.address = w['address']
-                    worker.port = w['port']
-                    worker.last_mpe = w['last_mpe']
-                    worker.avg_ipm = w['avg_ipm']
-                    worker.master = w['master']
+                    worker.port = w.get('port', 80)
+                    worker.last_mpe = w.get('last_mpe', None)
+                    worker.avg_ipm = w.get('avg_ipm', None)
+                    worker.master = w.get('master', False)
                 except KeyError as e:
-                    raise e
                     logger.error(f"invalid configuration in file for worker {w}... ignoring")
+                    continue
+                except InvalidWorkerResponse as e:
+                    logger.error(f"worker {w} is invalid... ignoring")
                     continue
         logger.debug("loaded config")
 

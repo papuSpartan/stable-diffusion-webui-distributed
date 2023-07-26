@@ -2,7 +2,7 @@ import io
 
 import gradio
 import requests
-from typing import List, Union
+from typing import List, Tuple, Union
 import math
 import copy
 import time
@@ -47,29 +47,33 @@ class Worker:
             queried (bool): Whether this worker's memory status has been polled yet. Defaults to False.
             verify_remotes (bool): Whether to verify the validity of remote worker certificates. Defaults to False.
             master (bool): Whether this worker is the master node. Defaults to False.
+            auth (str|None): The username and password used to authenticate with the worker. Defaults to None. (username:password)
             benchmarked (bool): Whether this worker has been benchmarked. Defaults to False.
             # TODO should be the last MPE from the last session
             eta_percent_error (List[float]): A runtime list of ETA percent errors for this worker. Empty by default
             last_mpe (float): The last mean percent error for this worker. Defaults to None.
             response (requests.Response): The last response from this worker. Defaults to None.
+            
+        Raises:
+            InvalidWorkerResponse: If the worker responds with an invalid or unexpected response.
         """
 
-    address: str = None
-    port: int = None
-    avg_ipm: float = None
-    uuid: str = None
+    address: Union[str, None] = None
+    port: int = 80
+    avg_ipm: Union[float, None] = None
+    uuid: Union[str, None] = None
     queried: bool = False  # whether this worker has been connected to yet
+    free_vram: Union[bytes, int] = 0
     verify_remotes: bool = False
     master: bool = False
     benchmarked: bool = False
     eta_percent_error: List[float] = []
-    last_mpe: float = None
-    response: requests.Response = None
-    loaded_model: str = None
-    loaded_vae: str = None
-    state: State = None
+    last_mpe: Union[float,None] = None
+    response: Union[requests.Response, None] = None
+    loaded_model: Union[str, None] = None
+    loaded_vae: Union[str, None] = None
+    state: Union[State, None] = None
     tls: bool = False
-
     # Percentages representing (roughly) how much faster a given sampler is in comparison to Euler A.
     # We compare to euler a because that is what we currently benchmark each node with.
     other_to_euler_a = {
@@ -93,8 +97,18 @@ class Worker:
         "PLMS": 9.31
     }
 
-    def __init__(self, address: str = None, port: int = None, uuid: str = None, verify_remotes: bool = None,
-                 master: bool = False, tls: bool = False):
+    def __init__(self, address: Union[str, None] = None, port: int = 80, uuid: Union[str, None] = None, verify_remotes: bool = True,
+                 master: bool = False, tls: bool = False, auth: Union[str, None, Tuple] = None):
+        """
+        Creates a new worker object.
+        
+        param address: The address of the worker node. Can be an ip or a FQDN. Defaults to None. do NOT include sdapi/v1 in the address.
+        param port: The port number used by the worker node. Defaults to 80. (http) or 443 (https)
+        param uuid: The unique identifier/name of the worker node. Defaults to None.
+        param verify_remotes: Whether to verify the validity of remote worker certificates. Defaults to True.
+        param master: Whether this worker is the master node. Defaults to False.
+        param auth: The username and password used to authenticate with the worker. Defaults to None. (username:password)
+        """
         if master is True:
             self.master = master
             self.uuid = 'master'
@@ -106,7 +120,19 @@ class Worker:
             else:
                 self.port = cmd_opts.port
             return
-
+        # strip http:// or https:// from address if present
+        self.tls = tls
+        if address is not None:
+            if address.startswith("http://"):
+                address = address[7:]
+            elif address.startswith("https://"):
+                address = address[8:]
+                self.tls = True
+                self.port = 443
+        # remove '/' from end of address if present
+        if address is not None:
+            if address.endswith('/'):
+                address = address[:-1]
         self.address = address
         self.port = port
         self.verify_remotes = verify_remotes
@@ -114,13 +140,34 @@ class Worker:
         self.loaded_model = ''
         self.loaded_vae = ''
         self.state = State.IDLE
-        self.tls = tls
         self.model_override: str = None
-
+        if auth is not None:
+            if isinstance(auth, str):
+                self.user = auth.split(':')[0]
+                self.password = auth.split(':')[1]
+            elif isinstance(auth, tuple):
+                self.user = auth[0]
+                self.password = auth[1]
+            else:
+                raise ValueError(f"Invalid auth value: {auth}")
+        self.auth: Union[Tuple[str, str] , None] = (self.user, self.password) if self.user is not None else None
         if uuid is not None:
             self.uuid = uuid
+        self.session = requests.Session()
+        self.session.auth = self.auth
+        logger.debug(f"worker '{self.uuid}' created with address '{self.full_url('')}'")
+        if self.verify_remotes:
+            # check user/ GET response
+            response = self.session.get(
+                self.full_url("memory"),
+                verify=self.verify_remotes
+            )
+            if response.status_code != 200:
+                raise InvalidWorkerResponse(f"Worker '{self.uuid}' responded with status code {response.status_code}")
 
     def __str__(self):
+        if self.port is None or self.port == 80:
+            return f"{self.address}"
         return f"{self.address}:{self.port}"
 
     def info(self) -> dict:
@@ -163,7 +210,6 @@ class Worker:
         Returns:
             str: The full url.
         """
-
         protocol = 'http' if not self.tls else 'https'
         return f"{protocol}://{self.__str__()}/sdapi/v1/{route}"
 
@@ -255,7 +301,7 @@ class Worker:
             option_payload (dict): The options payload.
             sync_options (bool): Whether to attempt to synchronize the worker's loaded models with the locals'
         """
-        eta = None
+        eta = 0
 
         # TODO detect remote out of memory exception and restart or garbage collect instance using api?
         try:
@@ -264,10 +310,11 @@ class Worker:
             # query memory available on worker and store for future reference
             if self.queried is False:
                 self.queried = True
-                memory_response = requests.get(
+                memory_response = self.session.get(
                     self.full_url("memory"),
                     verify=self.verify_remotes
                 )
+                #curl -X GET "http://localhost:7860/memory" -H  "accept: application/json"
                 memory_response = memory_response.json()
                 try:
                     memory_response = memory_response['cuda']['system']  # all in bytes
@@ -335,7 +382,7 @@ class Worker:
                 response_queue = queue.Queue()
                 def preemptable_request(response_queue):
                     try:
-                        response = requests.post(
+                        response = self.session.post(
                             self.full_url("txt2img") if init_images is None else self.full_url("img2img"),
                             json=payload,
                             verify=self.verify_remotes
@@ -401,7 +448,7 @@ class Worker:
         self.state = State.IDLE
         return
 
-    def benchmark(self) -> int:
+    def benchmark(self) -> float:
         """
         given a worker, run a small benchmark and return its performance in images/minute
         makes standard request(s) of 512x512 images and averages them to get the result
@@ -454,26 +501,26 @@ class Worker:
 
         # average the sample results for accuracy
         ipm_sum = 0
-        for ipm in results:
-            ipm_sum += ipm
-        avg_ipm = ipm_sum / samples
+        for ipm_result in results:
+            ipm_sum += ipm_result
+        avg_ipm_result = ipm_sum / samples
 
-        logger.debug(f"Worker '{self.uuid}' average ipm: {avg_ipm}")
-        self.avg_ipm = avg_ipm
+        logger.debug(f"Worker '{self.uuid}' average ipm: {avg_ipm_result}")
+        self.avg_ipm = avg_ipm_result
         # noinspection PyTypeChecker
         self.response = None
         self.benchmarked = True
         self.state = State.IDLE
-        return avg_ipm
+        return avg_ipm_result
 
     def refresh_checkpoints(self):
         try:
-            model_response = requests.post(
+            model_response = self.session.post(
                 self.full_url('refresh-checkpoints'),
                 json={},
                 verify=self.verify_remotes
             )
-            lora_response = requests.post(
+            lora_response = self.session.post(
                 self.full_url('refresh-loras'),
                 json={},
                 verify=self.verify_remotes
@@ -489,7 +536,7 @@ class Worker:
 
     def interrupt(self):
         try:
-            response = requests.post(
+            response = self.session.post(
                 self.full_url('interrupt'),
                 json={},
                 verify=self.verify_remotes
@@ -504,7 +551,7 @@ class Worker:
     def reachable(self) -> bool:
         """returns false if worker is unreachable"""
         try:
-            response = requests.get(
+            response = self.session.get(
                 self.full_url("memory"),
                 verify=self.verify_remotes,
                 timeout=3
