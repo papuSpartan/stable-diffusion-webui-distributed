@@ -47,8 +47,12 @@ class Script(scripts.Script):
     # build world
     world = World(initial_payload=None, verify_remotes=verify_remotes)
     # add workers to the world
-    for worker in cmd_opts.distributed_remotes:
-        world.add_worker(uuid=worker[0], address=worker[1], port=worker[2])
+    if cmd_opts.distributed_remotes is not None:
+        for worker in cmd_opts.distributed_remotes:
+            world.add_worker(uuid=worker[0], address=worker[1], port=worker[2])
+    # else read from config
+    if cmd_opts.distributed_remotes is None and cmd_opts.distributed_config is not None:
+        world.load_config(cmd_opts.distributed_config)
 
     def title(self):
         return "Distribute"
@@ -229,13 +233,14 @@ class Script(scripts.Script):
     def run(self, p, *args):
         current_thread().name = "distributed_main"
 
-        if cmd_opts.distributed_remotes is None:
+        if cmd_opts.distributed_remotes is None and cmd_opts.distributed_config is None:
             raise RuntimeError("Distributed - No remotes passed. (Try using `--distributed-remotes`?)")
 
         Script.initialize(initial_payload=p)
 
         # strip scripts that aren't yet supported and warn user
         packed_script_args: List[dict] = []  # list of api formatted per-script argument objects
+        # { "script_name": { "args": ["value1", "value2", ...] }
         for script in p.scripts.scripts:
             if script.alwayson is not True:
                 continue
@@ -256,6 +261,12 @@ class Script(scripts.Script):
 
                 continue
             else:
+                # other scripts to pack
+                args_script_pack = {}
+                args_script_pack[title] = {"args": []}
+                for arg in p.script_args[script.args_from:script.args_to]:
+                    args_script_pack[title]["args"].append(arg)
+                packed_script_args.append(args_script_pack)
                 # https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111/issues/12#issuecomment-1480382514
                 if Script.runs_since_init < 1:
                     logger.warning(f"Distributed doesn't yet support '{title}'")

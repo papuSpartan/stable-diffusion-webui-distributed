@@ -9,14 +9,14 @@ import copy
 import json
 import os
 import time
-from typing import List
+from typing import List, Union
 from threading import Thread
 from inspect import getsourcefile
 from os.path import abspath
 from pathlib import Path
 from modules.processing import process_images, StableDiffusionProcessingTxt2Img
 import modules.shared as shared
-from scripts.spartan.Worker import Worker, State
+from scripts.spartan.Worker import InvalidWorkerResponse, Worker, State
 from scripts.spartan.shared import logger, warmup_samples, benchmark_payload
 
 
@@ -135,8 +135,10 @@ class World:
         for job in self.jobs:
             if job.worker.master:
                 return job
+        
+        raise Exception("Master job not found")
 
-    def add_worker(self, uuid: str, address: str, port: int):
+    def add_worker(self, uuid: str, address: str, port: int, auth: Union[str,None] = None):
         """
         Registers a worker with the world.
 
@@ -146,8 +148,61 @@ class World:
             port (int): The port number.
         """
 
-        worker = Worker(uuid=uuid, address=address, port=port, verify_remotes=self.verify_remotes)
+        worker = Worker(uuid=uuid, address=address, port=port, verify_remotes=self.verify_remotes, auth=auth)
         self.__workers.append(worker)
+        
+    def load_config(self, config_path: Union[str, None] = None):
+        """
+        Loads the configuration file from disk.
+        
+        Args:
+            config_path (str): The path to the configuration file(json).
+        """
+        if config_path is None:
+            return
+        if not os.path.exists(config_path):
+            logger.error(f"config file '{config_path}' not found")
+            return
+        workers = []
+        with open(config_path, 'r') as config_file:
+            try:
+                workers = json.load(config_file)
+            except json.JSONDecodeError:
+                logger.error(f"config file '{config_path}' is not valid JSON")
+                return
+        for worker in workers:
+            use_https = worker.get('use_https', False)
+            if use_https:
+                worker['address'] = f"https://{worker['address']}"
+            try:
+                self.add_worker(worker['uuid'], worker['address'], worker.get('port', None), worker.get('auth', None))
+            except InvalidWorkerResponse:
+                logger.error(f"worker '{worker['uuid']}' is not a valid worker")
+                continue
+            
+    def save_config(self, config_path: Union[str, None] = None):
+        """
+        Saves the configuration file to disk.
+        
+        Args:
+            config_path (str): The path to the configuration file(json).
+        """
+        
+        ### example config
+        ### [{"uuid": "worker1", "address": "example.com", "port": None, "auth": "username:password"}]
+        if config_path is None:
+            return
+        workers = []
+        for worker in self.get_workers():
+            worker_info = {}
+            worker_info['uuid'] = worker.uuid
+            worker_info['address'] = worker.address
+            worker_info['port'] = worker.port
+            worker_info['auth'] = worker.auth
+            worker_info['use_https'] = worker.use_https
+            workers.append(worker_info)
+        with open(config_path, 'w') as config_file:
+            json.dump(workers, config_file, indent=3)
 
     def interrupt_remotes(self):
 
@@ -372,7 +427,7 @@ class World:
             self.jobs.append(Job(worker=worker, batch_size=batch_size))
 
     def get_workers(self):
-        filtered = []
+        filtered:List[Worker] = []
         for worker in self.__workers:
             if worker.avg_ipm is not None and worker.avg_ipm <= 0:
                 logger.warning(f"config reports invalid speed (0 ipm) for worker '{worker.uuid}', setting default of 1 ipm.\nplease re-benchmark")
