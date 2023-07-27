@@ -110,13 +110,12 @@ class UI:
         return gradio.Dropdown.update(choices=labels)
 
     def populate_worker_config_from_selection(self, selection):
-        selected_worker: Worker = None
-        for worker in self.world.get_workers():
-            if worker.uuid == selection:
-                selected_worker = worker
+        avail_models = None
+        selected_worker = self.world[selection]
 
         avail_models = selected_worker.available_models()
-        avail_models.append('None')  # for disabling override
+        if avail_models is not None:
+            avail_models.append('None')  # for disabling override
 
         return [
             gradio.Textbox.update(value=selected_worker.address),
@@ -124,7 +123,6 @@ class UI:
             gradio.Checkbox.update(value=selected_worker.tls),
             gradio.Dropdown.update(choices=avail_models)
         ]
-
 
     def reconnect_remotes(self):
         for worker in self.world._workers:
@@ -141,7 +139,7 @@ class UI:
                     logger.info(f"worker '{worker.uuid}' is still unreachable")
 
     def override_worker_model(self, model, worker_label):
-        worker = self.world.worker_from_label(worker_label)
+        worker = self.world[worker_label]
 
         if model == "None":
             worker.model_override = None

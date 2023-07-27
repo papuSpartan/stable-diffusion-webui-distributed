@@ -2,7 +2,7 @@ import io
 
 import gradio
 import requests
-from typing import List
+from typing import List, Union
 import math
 import copy
 import time
@@ -506,7 +506,8 @@ class Worker:
         try:
             response = requests.get(
                 self.full_url("memory"),
-                verify=self.verify_remotes
+                verify=self.verify_remotes,
+                timeout=3
             )
             if response.status_code == 200:
                 return True
@@ -517,17 +518,25 @@ class Worker:
             return False
 
     def mark_unreachable(self):
-        logger.error(f"Worker '{self.uuid}' at {self} was unreachable, will avoid in future")
+        logger.error(f"Worker '{self.uuid}' at {self} was unreachable, will avoid in the future")
         self.state = State.UNAVAILABLE
 
-    def available_models(self) -> List[str]:
-        response = requests.get(
-            url=self.full_url('sd-models'),
-            verify=self.verify_remotes
-        )
+    def available_models(self) -> Union[List[str], None]:
+        if self.state == State.UNAVAILABLE:
+            return None
 
-        titles = [model['title'] for model in response.json()]
-        return titles
+        try:
+            response = requests.get(
+                url=self.full_url('sd-models'),
+                verify=self.verify_remotes,
+                timeout=5
+            )
+
+            titles = [model['title'] for model in response.json()]
+            return titles
+        except requests.RequestException:
+            self.mark_unreachable()
+            return None
 
     def load_options(self, model, vae=None):
         model_name = re.sub(r'\s?\[[^\]]*\]$', '', model)

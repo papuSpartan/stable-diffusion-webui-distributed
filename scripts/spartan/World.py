@@ -83,6 +83,11 @@ class World:
         self.initial_payload = copy.copy(initial_payload)
         self.thin_client_mode = False
 
+    def __getitem__(self, label: str) -> Worker:
+        for worker in self._workers:
+            if worker.uuid == label:
+                return worker
+
     def update_world(self, total_batch_size):
         """
         Updates the world with information vital to handling the local generation request after
@@ -526,8 +531,3 @@ class World:
             json.dump(config, config_file, indent=3)
             logger.debug(f"config saved")
 
-
-    def worker_from_label(self, label: str) -> Worker:
-        for worker in self._workers:
-            if worker.uuid == label:
-                return worker
