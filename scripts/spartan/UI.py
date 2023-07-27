@@ -128,6 +128,9 @@ class UI:
 
     def reconnect_remotes(self):
         for worker in self.world._workers:
+            if worker.master:
+                continue
+
             logger.debug(f"checking if worker '{worker.uuid}' is now reachable...")
             reachable = worker.reachable()
             if worker.state == State.UNAVAILABLE:
