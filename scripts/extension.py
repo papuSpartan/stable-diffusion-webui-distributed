@@ -52,8 +52,6 @@ class Script(scripts.Script):
     if cmd_opts.distributed_remotes is not None and len(cmd_opts.distributed_remotes) > 0:
         for worker in cmd_opts.distributed_remotes:
             world.add_worker(uuid=worker[0], address=worker[1], port=worker[2])
-    else:
-        logger.fatal(f"Found no worker info passed as arguments. Did you populate --distributed-remotes ?")
 
     world.load_config()
 
