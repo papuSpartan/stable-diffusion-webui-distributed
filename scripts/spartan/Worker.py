@@ -151,7 +151,7 @@ class Worker:
             if isinstance(auth, str):
                 self.user = auth.split(':')[0]
                 self.password = auth.split(':')[1]
-            elif isinstance(auth, tuple):
+            elif isinstance(auth, (tuple, list)):
                 self.user = auth[0]
                 self.password = auth[1]
             else:
