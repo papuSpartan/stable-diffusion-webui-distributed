@@ -146,7 +146,7 @@ class World:
         raise Exception("Master job not found")
 
     # TODO better way of merging/updating workers
-    def add_worker(self, uuid: str, address: str, port: int, auth: Union[str,None] = None, tls: bool = False):
+    def add_worker(self, uuid: str, address: str, port: int, auth: Union[str,None] = None, tls: bool = False, master: bool = False):
         """
         Registers a worker with the world.
 
@@ -162,7 +162,7 @@ class World:
             InvalidWorkerResponse: If the worker is not valid.
         """
         original = None
-        new = Worker(uuid=uuid, address=address, port=port, verify_remotes=self.verify_remotes, tls=tls, auth=auth)
+        new = Worker(uuid=uuid, address=address, port=port, verify_remotes=self.verify_remotes, tls=tls, auth=auth, master=master)
 
         for w in self._workers:
             if w.uuid == uuid:
@@ -377,7 +377,7 @@ class World:
 
     def get_workers(self):
         filtered:List[Worker] = []
-        for worker in self.__workers:
+        for worker in self._workers:
             if worker.avg_ipm is not None and worker.avg_ipm <= 0:
                 logger.warning(f"config reports invalid speed (0 ipm) for worker '{worker.uuid}', setting default of 1 ipm.\nplease re-benchmark")
                 worker.avg_ipm = 1
@@ -489,7 +489,7 @@ class World:
                 del self.jobs[last]
             last -= 1
 
-    def config(self) -> json:
+    def config(self) -> dict:
         # {
         #     "workers": [
         #         {
@@ -503,7 +503,6 @@ class World:
             return
 
         with open(self.config_path, 'r') as config:
-
             try:
                 return json.load(config)
             except json.decoder.JSONDecodeError:
@@ -513,7 +512,7 @@ class World:
         config = self.config()
 
         if config is not None:
-            for worker_dict in config['workers']:
+            for worker_dict in config.get('workers', []):
                 label = next(iter(worker_dict))
                 w = worker_dict[label]
                 try:
@@ -522,13 +521,11 @@ class World:
                         address=w['address'],
                         port=w.get('port', 80),
                         tls=w.get('tls', False),
-                        auth =w.get('auth', None)
+                        auth =w.get('auth', None),
+                        master=w.get('master', False)   
                     )
-                    worker.address = w['address']
-                    worker.port = w.get('port', 80)
                     worker.last_mpe = w.get('last_mpe', None)
                     worker.avg_ipm = w.get('avg_ipm', None)
-                    worker.master = w.get('master', False)
                 except KeyError as e:
                     logger.error(f"invalid configuration in file for worker {w}... ignoring")
                     continue

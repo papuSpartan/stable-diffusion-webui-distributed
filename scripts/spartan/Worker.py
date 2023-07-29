@@ -2,6 +2,7 @@ import io
 
 import gradio
 import requests
+from requests import Session
 from typing import List, Tuple, Union
 import math
 import copy
@@ -74,6 +75,9 @@ class Worker:
     loaded_vae: Union[str, None] = None
     state: Union[State, None] = None
     tls: bool = False
+    auth: Union[Tuple[str, str], None] = None
+    user: Union[str, None] = None
+    password: Union[str, None] = None
     # Percentages representing (roughly) how much faster a given sampler is in comparison to Euler A.
     # We compare to euler a because that is what we currently benchmark each node with.
     other_to_euler_a = {
@@ -114,7 +118,7 @@ class Worker:
             self.uuid = 'master'
 
             # right now this is really only for clarity while debugging:
-            self.address = server_name
+            self.address = server_name if server_name is not None else 'localhost'
             if cmd_opts.port is None:
                 self.port = 7860
             else:
@@ -129,10 +133,10 @@ class Worker:
                 address = address[8:]
                 self.tls = True
                 self.port = 443
-        # remove '/' from end of address if present
-        if address is not None:
             if address.endswith('/'):
                 address = address[:-1]
+        else:
+            raise InvalidWorkerResponse("Worker address cannot be None")
         self.address = address
         self.port = port
         self.verify_remotes = verify_remotes
@@ -141,6 +145,8 @@ class Worker:
         self.loaded_vae = ''
         self.state = State.IDLE
         self.model_override: str = None
+        self.user = None
+        self.password = None
         if auth is not None:
             if isinstance(auth, str):
                 self.user = auth.split(':')[0]
@@ -157,7 +163,7 @@ class Worker:
         self.session.auth = self.auth
         logger.debug(f"worker '{self.uuid}' created with address '{self.full_url('')}'")
         if self.verify_remotes:
-            # check user/ GET response
+            # check memory/ GET response
             response = self.session.get(
                 self.full_url("memory"),
                 verify=self.verify_remotes
@@ -178,7 +184,8 @@ class Worker:
             "address": self.address,
             "port": self.port,
             "last_mpe": self.last_mpe,
-            "tls": self.tls
+            "tls": self.tls,
+            "auth": self.auth
         }
 
         d[self.uuid] = data
@@ -573,7 +580,7 @@ class Worker:
             return None
 
         try:
-            response = requests.get(
+            response = self.session.get(
                 url=self.full_url('sd-models'),
                 verify=self.verify_remotes,
                 timeout=5
@@ -593,7 +600,7 @@ class Worker:
         if vae is not None:
             payload['sd_vae'] = vae
 
-        response = requests.post(
+        response = self.session.post(
             self.full_url("options"),
             json=payload,
             verify=self.verify_remotes
