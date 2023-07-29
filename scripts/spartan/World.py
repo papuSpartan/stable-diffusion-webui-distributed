@@ -154,6 +154,9 @@ class World:
             uuid (str): The name or unique identifier.
             address (str): The ip or FQDN.
             port (int): The port number.
+            auth (str): The authentication, example 'username:password'.
+            tls (bool): Whether to use TLS. Automatically set if address is https.
+            master (bool): Whether the worker is the local/master worker.
         
         Returns:
             Worker: The worker object.
@@ -509,6 +512,10 @@ class World:
                 logger.error(f"config is corrupt or invalid JSON, unable to load")
 
     def load_config(self):
+        """
+        Loads the config file and adds workers to the world.
+        This function should be called after worker command arguments are parsed.
+        """
         config = self.config()
 
         if config is not None:
@@ -538,6 +545,9 @@ class World:
             logger.debug("loaded config")
 
     def save_config(self):
+        """
+        Saves the config file.
+        """
         config = {
             'workers': [],
             'benchmark_payload': sh.benchmark_payload

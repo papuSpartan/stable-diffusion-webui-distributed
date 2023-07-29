@@ -102,7 +102,7 @@ class Worker:
     }
 
     def __init__(self, address: Union[str, None] = None, port: int = 80, uuid: Union[str, None] = None, verify_remotes: bool = True,
-                 master: bool = False, tls: bool = False, auth: Union[str, None, Tuple] = None):
+                 master: bool = False, tls: bool = False, auth: Union[str, None, Tuple, List] = None):
         """
         Creates a new worker object.
         
@@ -111,6 +111,7 @@ class Worker:
         param uuid: The unique identifier/name of the worker node. Defaults to None.
         param verify_remotes: Whether to verify the validity of remote worker certificates. Defaults to True.
         param master: Whether this worker is the master node. Defaults to False.
+        param tls: Whether to use https. Defaults to False, automatically set to True if address starts with https://
         param auth: The username and password used to authenticate with the worker. Defaults to None. (username:password)
         """
         if master is True:
@@ -321,7 +322,6 @@ class Worker:
                     self.full_url("memory"),
                     verify=self.verify_remotes
                 )
-                #curl -X GET "http://localhost:7860/memory" -H  "accept: application/json"
                 memory_response = memory_response.json()
                 try:
                     memory_response = memory_response['cuda']['system']  # all in bytes
