@@ -4,14 +4,14 @@ import subprocess
 import threading
 from pathlib import Path
 import gradio
-from scripts.spartan.shared import logger, log_level
-from scripts.spartan.Worker import State, Worker
+from .shared import logger, log_level
+from .Worker import State, Worker
 from modules.shared import state as webui_state
-import json
 from typing import List
 from threading import Thread
 
 worker_select_dropdown = None
+
 
 class UI:
 

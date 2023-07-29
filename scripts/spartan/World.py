@@ -16,9 +16,9 @@ from os.path import abspath
 from pathlib import Path
 from modules.processing import process_images, StableDiffusionProcessingTxt2Img
 import modules.shared as shared
-from scripts.spartan.Worker import Worker, State
-from scripts.spartan.shared import logger, warmup_samples
-import scripts.spartan.shared as sh
+from .Worker import Worker, State
+from .shared import logger, warmup_samples
+from . import shared as sh
 
 
 class NotBenchmarked(Exception):

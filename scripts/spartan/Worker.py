@@ -1,6 +1,5 @@
 import io
 
-import gradio
 import requests
 from typing import List, Union
 import math
@@ -9,16 +8,15 @@ import time
 from threading import Thread
 from webui import server_name
 from modules.shared import cmd_opts
-import gradio as gr
-from scripts.spartan.shared import logger, warmup_samples
 from enum import Enum
 import json
 import base64
 import queue
 from modules.shared import state as master_state
 from modules.api.api import encode_pil_to_base64
-import scripts.spartan.shared as sh
 import re
+from . import shared as sh
+from .shared import logger, warmup_samples
 
 
 class InvalidWorkerResponse(Exception):
@@ -115,7 +113,8 @@ class Worker:
         self.loaded_vae = ''
         self.state = State.IDLE
         self.tls = tls
-        self.model_override: str = None
+        self.model_override: Union[str, None] = None
+        self.free_vram: int = 0
 
         if uuid is not None:
             self.uuid = uuid
@@ -333,7 +332,7 @@ class Worker:
 
                 # the main api requests sent to either the txt2img or img2img route
                 response_queue = queue.Queue()
-                def preemptable_request(response_queue):
+                def preemptible_request(response_queue):
                     try:
                         response = requests.post(
                             self.full_url("txt2img") if init_images is None else self.full_url("img2img"),
@@ -343,7 +342,7 @@ class Worker:
                         response_queue.put(response)
                     except Exception as e:
                         response_queue.put(e)  # forwarding thrown exceptions to parent thread
-                request_thread = Thread(target=preemptable_request, args=(response_queue,))
+                request_thread = Thread(target=preemptible_request, args=(response_queue,))
                 interrupting = False
                 start = time.time()
                 request_thread.start()
@@ -427,8 +426,8 @@ class Worker:
             return sh.benchmark_payload['batch_size'] / (seconds / 60)
 
         results: List[float] = []
-        # it's seems to be lower for the first couple of generations
-        # this is due to something torch does at startup according to auto and is now done at sdwui startup
+        # it used to be lower for the first couple of generations
+        # this was due to something torch does at startup according to auto and is now done at sdwui startup
         self.state = State.WORKING
         for i in range(0, samples + warmup_samples):  # run some extra times so that the remote can "warm up"
             if self.state == State.UNAVAILABLE:
@@ -446,8 +445,8 @@ class Worker:
                 raise e
 
             if i >= warmup_samples:
-                logger.info(f"Sample {i - warmup_samples + 1}: Worker '{self.uuid}'({self}) - {sample_ipm:.2f} image(s) per "
-                      f"minute\n")
+                logger.info(f"Sample {i - warmup_samples + 1}: Worker '{self.uuid}'({self}) "
+                            f"- {sample_ipm:.2f} image(s) per minute\n")
                 results.append(sample_ipm)
             elif i == warmup_samples - 1:
                 logger.debug(f"{self.uuid} finished warming up\n")
@@ -460,7 +459,6 @@ class Worker:
 
         logger.debug(f"Worker '{self.uuid}' average ipm: {avg_ipm}")
         self.avg_ipm = avg_ipm
-        # noinspection PyTypeChecker
         self.response = None
         self.benchmarked = True
         self.state = State.IDLE
@@ -558,4 +556,3 @@ class Worker:
             self.loaded_model = model_name
             if vae is not None:
                 self.loaded_vae = vae
-
