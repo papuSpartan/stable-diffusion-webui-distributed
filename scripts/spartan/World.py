@@ -17,7 +17,7 @@ from pathlib import Path
 from modules.processing import process_images, StableDiffusionProcessingTxt2Img
 import modules.shared as shared
 from scripts.spartan.Worker import InvalidWorkerResponse, Worker, State
-from scripts.spartan.shared import logger, warmup_samples, benchmark_payload
+from scripts.spartan.shared import logger, warmup_samples
 import scripts.spartan.shared as sh
 
 
@@ -490,8 +490,16 @@ class World:
             last -= 1
 
     def config(self) -> json:
+        # {
+        #     "workers": [
+        #         {
+        #             "worker1": {
+        #                 "address": "<http://www.example.com>"
+        #             }
+        #         }, ...
+        #}
         if not os.path.exists(self.config_path):
-            logger.debug(f"Config was not found at '{self.config_path}'")
+            logger.error(f"Config was not found at '{self.config_path}'")
             return
 
         with open(self.config_path, 'r') as config:
@@ -499,7 +507,7 @@ class World:
             try:
                 return json.load(config)
             except json.decoder.JSONDecodeError:
-                logger.debug(f"config is corrupt or invalid JSON, unable to load")
+                logger.error(f"config is corrupt or invalid JSON, unable to load")
 
     def load_config(self):
         config = self.config()
@@ -527,7 +535,10 @@ class World:
                 except InvalidWorkerResponse as e:
                     logger.error(f"worker {w} is invalid... ignoring")
                     continue
-        logger.debug("loaded config")
+        if not self.has_any_workers:
+            logger.error(f"no workers were loaded from config, please add workers to {self.config_path}")
+        else:
+            logger.debug("loaded config")
 
     def save_config(self):
         config = {
