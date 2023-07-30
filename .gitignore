@@ -1,0 +1,4 @@
+
+*.pyc
+workers.json
+config.json

@@ -9,7 +9,7 @@ import copy
 import json
 import os
 import time
-from typing import List
+from typing import List, Union
 from threading import Thread
 from inspect import getsourcefile
 from os.path import abspath
@@ -70,7 +70,7 @@ class World:
 
     # I'd rather keep the sdwui root directory clean.
     extension_path = Path(abspath(getsourcefile(lambda: 0))).parent.parent.parent
-    config_path = extension_path.joinpath('config.json')
+    config_path = shared.cmd_opts.distributed_config
 
     def __init__(self, initial_payload, verify_remotes: bool = True):
         self.master_worker = Worker(master=True)
@@ -82,6 +82,7 @@ class World:
         self.verify_remotes = verify_remotes
         self.initial_payload = copy.copy(initial_payload)
         self.thin_client_mode = False
+        self.has_any_workers = False # whether any workers have been added to the world
 
     def __getitem__(self, label: str) -> Worker:
         for worker in self._workers:
@@ -142,8 +143,10 @@ class World:
             if job.worker.master:
                 return job
 
+        raise Exception("Master job not found")
+
     # TODO better way of merging/updating workers
-    def add_worker(self, uuid: str, address: str, port: int, tls: bool = False):
+    def add_worker(self, uuid: str, address: str, port: int, auth: Union[str, None] = None, tls: bool = False, master: bool = False):
         """
         Registers a worker with the world.
 
@@ -151,10 +154,18 @@ class World:
             uuid (str): The name or unique identifier.
             address (str): The ip or FQDN.
             port (int): The port number.
+            auth (str): The authentication, example 'username:password'.
+            tls (bool): Whether to use TLS. Automatically set if address is https.
+            master (bool): Whether the worker is the local/master worker.
+        
+        Returns:
+            Worker: The worker object.
+        
+        Raises:
+            InvalidWorkerResponse: If the worker is not valid.
         """
-
         original = None
-        new = Worker(uuid=uuid, address=address, port=port, verify_remotes=self.verify_remotes, tls=tls)
+        new = Worker(uuid=uuid, address=address, port=port, verify_remotes=self.verify_remotes, tls=tls, auth=auth, master=master)
 
         for w in self._workers:
             if w.uuid == uuid:
@@ -162,6 +173,7 @@ class World:
 
         if original is None:
             self._workers.append(new)
+            self.has_any_workers = True
             return new
         else:
             original.address = address
@@ -169,7 +181,6 @@ class World:
             original.tls = tls
 
             return original
-
     def interrupt_remotes(self):
 
         for worker in self.get_workers():
@@ -368,7 +379,7 @@ class World:
             self.jobs.append(Job(worker=worker, batch_size=batch_size))
 
     def get_workers(self):
-        filtered = []
+        filtered: List[Worker] = []
         for worker in self._workers:
             if worker.avg_ipm is not None and worker.avg_ipm <= 0:
                 logger.warning(f"config reports invalid speed (0 ipm) for worker '{worker.uuid}', setting default of 1 ipm.\nplease re-benchmark")
@@ -481,44 +492,62 @@ class World:
                 del self.jobs[last]
             last -= 1
 
-    def config(self) -> json:
+    def config(self) -> dict:
+        # {
+        #     "workers": [
+        #         {
+        #             "worker1": {
+        #                 "address": "<http://www.example.com>"
+        #             }
+        #         }, ...
+        #}
         if not os.path.exists(self.config_path):
-            logger.debug(f"Config was not found at '{self.config_path}'")
+            logger.error(f"Config was not found at '{self.config_path}'")
             return
 
         with open(self.config_path, 'r') as config:
-
             try:
                 return json.load(config)
             except json.decoder.JSONDecodeError:
-                logger.debug(f"config is corrupt or invalid JSON, unable to load")
+                logger.error(f"config is corrupt or invalid JSON, unable to load")
 
     def load_config(self):
+        """
+        Loads the config file and adds workers to the world.
+        This function should be called after worker command arguments are parsed.
+        """
         config = self.config()
 
         if config is not None:
-            for worker_dict in config['workers']:
+            for worker_dict in config.get('workers', []):
                 label = next(iter(worker_dict))
                 w = worker_dict[label]
                 try:
                     worker = self.add_worker(
                         uuid=label,
                         address=w['address'],
-                        port=w['port'],
-                        tls=w['tls']
+                        port=w.get('port', 80),
+                        tls=w.get('tls', False),
+                        auth=w.get('auth', None),
+                        master=w.get('master', False)
                     )
-                    worker.address = w['address']
-                    worker.port = w['port']
-                    worker.last_mpe = w['last_mpe']
-                    worker.avg_ipm = w['avg_ipm']
-                    worker.master = w['master']
+                    worker.last_mpe = w.get('last_mpe', None)
+                    worker.avg_ipm = w.get('avg_ipm', None)
                 except KeyError as e:
-                    raise e
                     logger.error(f"invalid configuration in file for worker {w}... ignoring")
                     continue
-        logger.debug("loaded config")
+                except InvalidWorkerResponse as e:
+                    logger.error(f"worker {w} is invalid... ignoring")
+                    continue
+        if not self.has_any_workers:
+            logger.error(f"no workers were loaded from config, please add workers to {self.config_path}")
+        else:
+            logger.debug("loaded config")
 
     def save_config(self):
+        """
+        Saves the config file.
+        """
         config = {
             'workers': [],
             'benchmark_payload': sh.benchmark_payload
