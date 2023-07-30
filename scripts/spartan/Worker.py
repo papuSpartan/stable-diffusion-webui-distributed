@@ -58,11 +58,11 @@ class Worker:
         """
 
     address: Union[str, None] = None
-    port: int = 80
+    port: int = 7860
     avg_ipm: Union[float, None] = None
     uuid: Union[str, None] = None
     queried: bool = False  # whether this worker has been connected to yet
-    free_vram: Union[bytes, int] = 0
+    free_vram: int = 0
     verify_remotes: bool = False
     master: bool = False
     benchmarked: bool = False
@@ -99,11 +99,11 @@ class Worker:
         "PLMS": 9.31
     }
 
-    def __init__(self, address: Union[str, None] = None, port: int = 80, uuid: Union[str, None] = None, verify_remotes: bool = True,
+    def __init__(self, address: Union[str, None] = None, port: int = 7860, uuid: Union[str, None] = None, verify_remotes: bool = True,
                  master: bool = False, tls: bool = False, auth: Union[str, None, Tuple, List] = None):
         """
         Creates a new worker object.
-        
+
         param address: The address of the worker node. Can be an ip or a FQDN. Defaults to None. do NOT include sdapi/v1 in the address.
         param port: The port number used by the worker node. Defaults to 80. (http) or 443 (https)
         param uuid: The unique identifier/name of the worker node. Defaults to None.
@@ -157,7 +157,7 @@ class Worker:
                 self.password = auth[1]
             else:
                 raise ValueError(f"Invalid auth value: {auth}")
-        self.auth: Union[Tuple[str, str] , None] = (self.user, self.password) if self.user is not None else None
+        self.auth: Union[Tuple[str, str], None] = (self.user, self.password) if self.user is not None else None
         if uuid is not None:
             self.uuid = uuid
         self.session = requests.Session()
@@ -173,8 +173,6 @@ class Worker:
                 raise InvalidWorkerResponse(f"Worker '{self.uuid}' responded with status code {response.status_code}")
 
     def __str__(self):
-        if self.port is None or self.port == 80:
-            return f"{self.address}"
         return f"{self.address}:{self.port}"
 
     def info(self) -> dict:
@@ -309,7 +307,7 @@ class Worker:
             option_payload (dict): The options payload.
             sync_options (bool): Whether to attempt to synchronize the worker's loaded models with the locals'
         """
-        eta = 0
+        eta = None
 
         # TODO detect remote out of memory exception and restart or garbage collect instance using api?
         try:

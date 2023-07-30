@@ -28,7 +28,7 @@ def preload(parser):
 		help="Enable debug information",
 		action="store_true"
 	)
-	extension_path = Path(abspath(getsourcefile(lambda: 0))).parent.parent.parent
+	extension_path = Path(abspath(getsourcefile(lambda: 0))).parent
 	config_path = extension_path.joinpath('distributed-config.json')
 	# add config file
 	parser.add_argument(

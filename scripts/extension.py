@@ -54,7 +54,6 @@ class Script(scripts.Script):
             world.add_worker(uuid=worker[0], address=worker[1], port=worker[2])
 
     world.load_config()
-    assert world.has_any_workers, "No workers are available. (Try using `--distributed-remotes`?)"
 
     def title(self):
         return "Distribute"
@@ -120,7 +119,11 @@ class Script(scripts.Script):
             if Script.world.thin_client_mode:
                 p.all_negative_prompts = processed.all_negative_prompts
 
-            info_text = image_info_post['infotexts'][i]
+            try:
+                info_text = image_info_post['infotexts'][i]
+            except IndexError:
+                logger.warning(f"image '{i}' was missing info-text")
+                info_text = image_info_post['infotexts'][0]
             processed.infotexts.append(info_text)
 
             # automatically save received image to local disk if desired
@@ -256,12 +259,12 @@ class Script(scripts.Script):
                 continue
             else:
                 # other scripts to pack
-                args_script_pack = {}
-                args_script_pack[title] = {"args": []}
-                for arg in p.script_args[script.args_from:script.args_to]:
-                    args_script_pack[title]["args"].append(arg)
-                packed_script_args.append(args_script_pack)
-                # https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111/issues/12#issuecomment-1480382514
+                # args_script_pack = {}
+                # args_script_pack[title] = {"args": []}
+                # for arg in p.script_args[script.args_from:script.args_to]:
+                #     args_script_pack[title]["args"].append(arg)
+                # packed_script_args.append(args_script_pack)
+                # # https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111/issues/12#issuecomment-1480382514
                 if Script.runs_since_init < 1:
                     logger.warning(f"Distributed doesn't yet support '{title}'")
 

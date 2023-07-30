@@ -82,7 +82,6 @@ class World:
         self.verify_remotes = verify_remotes
         self.initial_payload = copy.copy(initial_payload)
         self.thin_client_mode = False
-        self.has_any_workers = False # whether any workers have been added to the world
 
     def __getitem__(self, label: str) -> Worker:
         for worker in self._workers:
@@ -173,7 +172,6 @@ class World:
 
         if original is None:
             self._workers.append(new)
-            self.has_any_workers = True
             return new
         else:
             original.address = address
@@ -181,6 +179,7 @@ class World:
             original.tls = tls
 
             return original
+
     def interrupt_remotes(self):
 
         for worker in self.get_workers():
@@ -493,14 +492,16 @@ class World:
             last -= 1
 
     def config(self) -> dict:
-        # {
-        #     "workers": [
-        #         {
-        #             "worker1": {
-        #                 "address": "<http://www.example.com>"
-        #             }
-        #         }, ...
-        #}
+        """
+         {
+             "workers": [
+                 {
+                     "worker1": {
+                         "address": "<http://www.example.com>"
+                     }
+                 }, ...
+        }
+        """
         if not os.path.exists(self.config_path):
             logger.error(f"Config was not found at '{self.config_path}'")
             return
@@ -539,8 +540,7 @@ class World:
                 except InvalidWorkerResponse as e:
                     logger.error(f"worker {w} is invalid... ignoring")
                     continue
-        if not self.has_any_workers:
-            logger.error(f"no workers were loaded from config, please add workers to {self.config_path}")
+            # TODO add early warning when no workers are added
         else:
             logger.debug("loaded config")
 
