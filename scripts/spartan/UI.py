@@ -78,7 +78,8 @@ class UI:
         logger.debug(f"job timeout is now {job_timeout} seconds")
 
     def save_worker_btn(self, name, address, port, tls):
-        self.world.add_worker(name, address, port, tls)
+        # TODO refactor uuid field, add auth fields
+        self.world.add_worker(uuid=name, address=address, port=port, tls=tls)
         self.world.save_config()
 
         # visibly update which workers can be selected

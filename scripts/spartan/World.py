@@ -527,7 +527,7 @@ class World:
                     worker = self.add_worker(
                         uuid=label,
                         address=w['address'],
-                        port=w.get('port', 80),
+                        port=w.get('port', 7860),
                         tls=w.get('tls', False),
                         auth=w.get('auth', None),
                         master=w.get('master', False)
