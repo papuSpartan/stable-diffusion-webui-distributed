@@ -581,12 +581,19 @@ class Worker:
         if self.state == State.UNAVAILABLE:
             return None
 
+        url = self.full_url('sd-models')
         try:
             response = self.session.get(
-                url=self.full_url('sd-models'),
+                url=url,
                 verify=self.verify_remotes,
                 timeout=5
             )
+
+            if response.status_code != 200:
+                logger.error(f"request to {url} returned {response.status_code}")
+                if response.status_code == 404:
+                    logger.error(f"did you enable --api for '{self.uuid}'?")
+                return None
 
             titles = [model['title'] for model in response.json()]
             return titles
