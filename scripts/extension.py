@@ -74,15 +74,14 @@ class Script(scripts.Script):
         """adds generated images to the image gallery after waiting for all workers to finish"""
         webui_state.textinfo = "Distributed - injecting images"
 
-        def processed_inject_image(image, info_index, iteration: int, save_path_override=None, grid=False, response=None):
-            image_params: json = response["parameters"]
+        def processed_inject_image(image, info_index, save_path_override=None, grid=False, response=None):
+            image_params: json = response['parameters']
             image_info_post: json = json.loads(response["info"])  # image info known after processing
             num_response_images = image_params["batch_size"] * image_params["n_iter"]
 
             seed = None
             subseed = None
             negative_prompt = None
-
 
             try:
                 if num_response_images > 1:
@@ -93,10 +92,10 @@ class Script(scripts.Script):
                     seed = image_info_post['seed']
                     subseed = image_info_post['subseed']
                     negative_prompt = image_info_post['negative_prompt']
-            except Exception:
+            except IndexError:
                 # like with controlnet masks, there isn't always full post-gen info, so we use the first images'
-                logger.debug(f"Image at index {i} for '{worker.uuid}' was missing some post-generation data")
-                processed_inject_image(image=image, info_index=0, iteration=iteration)
+                logger.debug(f"Image at index {i} for '{job.worker.uuid}' was missing some post-generation data")
+                processed_inject_image(image=image, info_index=0, response=response)
                 return
 
             processed.all_seeds.append(seed)
@@ -122,8 +121,9 @@ class Script(scripts.Script):
             try:
                 info_text = image_info_post['infotexts'][i]
             except IndexError:
-                logger.warning(f"image '{i}' was missing info-text")
-                info_text = image_info_post['infotexts'][0]
+                if not grid:
+                    logger.warning(f"image {true_image_pos + 1} was missing info-text")
+                info_text = processed.infotexts[0]
             processed.infotexts.append(info_text)
 
             # automatically save received image to local disk if desired
@@ -151,7 +151,6 @@ class Script(scripts.Script):
 
         # some worker which we know has a good response that we can use for generating the grid
         donor_worker = None
-        spoofed_iteration = p.n_iter
         for job in Script.world.jobs:
             if job.batch_size < 1 or job.worker.master:
                 continue
@@ -160,7 +159,7 @@ class Script(scripts.Script):
                 images: json = job.worker.response["images"]
                 # if we for some reason get more than we asked for
                 if (job.batch_size * p.n_iter) < len(images):
-                    logger.debug(f"Requested {job.batch_size} images from '{job.worker.uuid}', got {len(images)}")
+                    logger.debug(f"Requested {job.batch_size} image(s) from '{job.worker.uuid}', got {len(images)}")
 
                 if donor_worker is None:
                     donor_worker = job.worker
@@ -175,21 +174,13 @@ class Script(scripts.Script):
                     logger.exception(e)
                 continue
 
-            injected_to_iteration = 0
-            images_per_iteration = Script.world.get_current_output_size()
             # visibly add work from workers to the image gallery
             for i in range(0, len(images)):
                 image_bytes = base64.b64decode(images[i])
                 image = Image.open(io.BytesIO(image_bytes))
 
                 # inject image
-                processed_inject_image(image=image, info_index=i, iteration=spoofed_iteration, response=job.worker.response)
-
-                if injected_to_iteration >= images_per_iteration - 1:
-                    spoofed_iteration += 1
-                    injected_to_iteration = 0
-                else:
-                    injected_to_iteration += 1
+                processed_inject_image(image=image, info_index=i, response=job.worker.response)
 
         if donor_worker is None:
             logger.critical("couldn't collect any responses, distributed will do nothing")
@@ -202,7 +193,6 @@ class Script(scripts.Script):
                 image=grid,
                 info_index=0,
                 save_path_override=p.outpath_grids,
-                iteration=spoofed_iteration,
                 grid=True,
                 response=donor_worker.response
             )
