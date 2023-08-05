@@ -71,6 +71,7 @@ class World:
     # I'd rather keep the sdwui root directory clean.
     extension_path = Path(abspath(getsourcefile(lambda: 0))).parent.parent.parent
     config_path = shared.cmd_opts.distributed_config
+    old_config_path = worker_info_path = extension_path.joinpath('workers.json')
 
     def __init__(self, initial_payload, verify_remotes: bool = True):
         self.master_worker = Worker(master=True)
@@ -504,7 +505,24 @@ class World:
         """
         if not os.path.exists(self.config_path):
             logger.error(f"Config was not found at '{self.config_path}'")
-            return
+            if os.path.exists(self.old_config_path):
+
+                with open(self.old_config_path) as config_file:
+                    old_config = json.load(config_file)
+                    config = {"workers": [], "benchmark_payload": old_config.get("benchmark_payload", None)}
+
+                    try:
+                        del old_config["benchmark_payload"]
+                    except KeyError:
+                        pass
+
+                    for worker_label in old_config:
+                        fields = old_config[worker_label]
+                        fields["address"] = "localhost"  # this should be overwritten by add_worker() getting the address from --distributed-remotes
+                        config["workers"].append({worker_label: fields})
+
+                    logger.info(f"translated legacy config")
+                    return config
 
         with open(self.config_path, 'r') as config:
             try:
@@ -537,10 +555,10 @@ class World:
                 except KeyError as e:
                     logger.error(f"invalid configuration in file for worker {w}... ignoring")
                     continue
-                except InvalidWorkerResponse as e:
-                    logger.error(f"worker {w} is invalid... ignoring")
-                    continue
-            # TODO add early warning when no workers are added
+                # TODO add early warning when no workers are added
+                # except InvalidWorkerResponse as e:
+                #     logger.error(f"worker {w} is invalid... ignoring")
+                #     continue
         else:
             logger.debug("loaded config")
 

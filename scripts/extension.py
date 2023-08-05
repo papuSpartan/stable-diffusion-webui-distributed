@@ -48,12 +48,18 @@ class Script(scripts.Script):
     # build world
     world = World(initial_payload=None, verify_remotes=verify_remotes)
     # add workers to the world
-    # make sure arguments aren't missing
+    world.load_config()
     if cmd_opts.distributed_remotes is not None and len(cmd_opts.distributed_remotes) > 0:
+        logger.warning(
+            f""" 
+            --distributed-remotes is deprecated and may be removed in the future
+            gui/external modification of {world.config_path} will be prioritized going forward
+            """
+        )
+
         for worker in cmd_opts.distributed_remotes:
             world.add_worker(uuid=worker[0], address=worker[1], port=worker[2])
-
-    world.load_config()
+        world.save_config()
 
     def title(self):
         return "Distribute"
@@ -113,7 +119,8 @@ class Script(scripts.Script):
             if p.n_iter > 1:  # if splitting by batch count
                 num_remote_images *= p.n_iter - 1
 
-            logger.debug(f"image {true_image_pos + 1}/{Script.world.total_batch_size * p.n_iter}, info-index: {info_index}")
+            logger.debug(f"image {true_image_pos + 1}/{Script.world.total_batch_size * p.n_iter}, "
+                         f"info-index: {info_index}")
 
             if Script.world.thin_client_mode:
                 p.all_negative_prompts = processed.all_negative_prompts
@@ -309,14 +316,16 @@ class Script(scripts.Script):
             payload_temp['batch_size'] = job.batch_size
             payload_temp['subseed'] += prior_images
             payload_temp['seed'] += prior_images if payload_temp['subseed_strength'] == 0 else 0
-            logger.debug(f"'{job.worker.uuid}' job's given starting seed is {payload_temp['seed']} with {prior_images} coming before it")
+            logger.debug(
+                f"'{job.worker.uuid}' job's given starting seed is {payload_temp['seed']} with {prior_images} coming before it")
 
             if job.worker.loaded_model != name or job.worker.loaded_vae != vae:
                 sync = True
                 job.worker.loaded_model = name
                 job.worker.loaded_vae = vae
 
-            t = Thread(target=job.worker.request, args=(payload_temp, option_payload, sync, ), name=f"{job.worker.uuid}_request")
+            t = Thread(target=job.worker.request, args=(payload_temp, option_payload, sync,),
+                       name=f"{job.worker.uuid}_request")
 
             t.start()
             Script.worker_threads.append(t)
