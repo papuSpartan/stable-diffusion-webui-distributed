@@ -162,7 +162,6 @@ class Worker:
             self.uuid = uuid
         self.session = requests.Session()
         self.session.auth = self.auth
-        logger.debug(f"worker '{self.uuid}' created with address '{self.full_url('')}'")
         if self.verify_remotes:
             # check memory/ GET response
             response = self.session.get(

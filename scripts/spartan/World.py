@@ -19,6 +19,7 @@ import modules.shared as shared
 from .Worker import Worker, State
 from .shared import logger, warmup_samples
 from . import shared as sh
+from . import models
 
 
 class NotBenchmarked(Exception):
@@ -535,32 +536,25 @@ class World:
         Loads the config file and adds workers to the world.
         This function should be called after worker command arguments are parsed.
         """
-        config = self.config()
+        config_raw = self.config()
+        config = models.Config(**config_raw)
 
-        if config is not None:
-            for worker_dict in config.get('workers', []):
-                label = next(iter(worker_dict))
-                w = worker_dict[label]
-                try:
-                    worker = self.add_worker(
-                        uuid=label,
-                        address=w['address'],
-                        port=w.get('port', 7860),
-                        tls=w.get('tls', False),
-                        auth=w.get('auth', None),
-                        master=w.get('master', False)
-                    )
-                    worker.last_mpe = w.get('last_mpe', None)
-                    worker.avg_ipm = w.get('avg_ipm', None)
-                except KeyError as e:
-                    logger.error(f"invalid configuration in file for worker {w}... ignoring")
-                    continue
-                # TODO add early warning when no workers are added
-                # except InvalidWorkerResponse as e:
-                #     logger.error(f"worker {w} is invalid... ignoring")
-                #     continue
-        else:
-            logger.debug("loaded config")
+        for w in config.workers:
+            label = next(iter(w.keys()))
+            fields = w[label]
+
+            worker = self.add_worker(
+                uuid=label,
+                address=fields.address,
+                port=fields.port,
+                tls=fields.tls,
+                auth=None,
+                master=fields.master
+            )
+            worker.last_mpe = fields.last_mpe
+            worker.avg_ipm = fields.avg_ipm
+
+        logger.debug("config loaded")
 
     def save_config(self):
         """
