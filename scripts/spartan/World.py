@@ -539,6 +539,11 @@ class World:
         config_raw = self.config()
         config = models.Config(**config_raw)
 
+        # saves config schema to <extension>/distributed-config.schema.json
+        print(models.Config.schema_json())
+        with open(self.extension_path.joinpath("distributed-config.schema.json"), "w") as schema_file:
+            json.dump(json.loads(models.Config.schema_json()), schema_file, indent=3)
+
         for w in config.workers:
             label = next(iter(w.keys()))
             fields = w[label]
