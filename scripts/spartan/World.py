@@ -567,7 +567,7 @@ class World:
         """
 
         config = models.Config(
-            workers=[x.info() for x in self._workers],
+            workers=[{worker.uuid: worker.model.dict()} for worker in self._workers],
             benchmark_payload=sh.benchmark_payload
         )
 

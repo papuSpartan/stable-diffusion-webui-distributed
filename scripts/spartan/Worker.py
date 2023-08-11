@@ -17,6 +17,7 @@ from modules.api.api import encode_pil_to_base64
 import re
 from . import shared as sh
 from .shared import logger, warmup_samples
+from . import models
 try:
     from webui import server_name
 except ImportError:  # webui 95821f0132f5437ef30b0dbcac7c51e55818c18f and newer
@@ -178,20 +179,9 @@ class Worker:
     def __str__(self):
         return f"{self.address}:{self.port}"
 
-    def info(self) -> dict:
-        d = {}
-        data = {
-            "avg_ipm": self.avg_ipm,
-            "master": self.master,
-            "address": self.address,
-            "port": self.port,
-            "last_mpe": self.last_mpe,
-            "tls": self.tls,
-            "auth": self.auth
-        }
-
-        d[self.uuid] = data
-        return d
+    @property
+    def model(self) -> models.Worker:
+        return models.Worker(**self.__dict__)
 
     def eta_mpe(self):
         """
