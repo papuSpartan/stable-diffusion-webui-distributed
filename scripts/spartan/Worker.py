@@ -7,7 +7,6 @@ import math
 import copy
 import time
 from threading import Thread
-from webui import server_name
 from modules.shared import cmd_opts
 from enum import Enum
 import json
@@ -18,6 +17,11 @@ from modules.api.api import encode_pil_to_base64
 import re
 from . import shared as sh
 from .shared import logger, warmup_samples
+try:
+    from webui import server_name
+except ImportError:  # webui 95821f0132f5437ef30b0dbcac7c51e55818c18f and newer
+    from modules.initialize_util import gradio_server_name
+    server_name = gradio_server_name()
 
 
 class InvalidWorkerResponse(Exception):
