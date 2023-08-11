@@ -565,15 +565,13 @@ class World:
         """
         Saves the config file.
         """
-        config = {
-            'workers': [],
-            'benchmark_payload': sh.benchmark_payload
-        }
 
-        for worker in self._workers:
-            config['workers'].append(worker.info())
+        config = models.Config(
+            workers=[x.info() for x in self._workers],
+            benchmark_payload=sh.benchmark_payload
+        )
 
         with open(self.config_path, 'w+') as config_file:
-            json.dump(config, config_file, indent=3)
+            config_file.write(config.json(indent=3))
             logger.debug(f"config saved")
 
