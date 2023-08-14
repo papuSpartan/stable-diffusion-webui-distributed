@@ -22,11 +22,14 @@ from scripts.spartan.UI import UI
 from scripts.spartan.shared import logger
 from scripts.spartan.control_net import pack_control_net
 from modules.processing import fix_seed, Processed
+import signal
+import sys
+
+old_sigint_handler = signal.getsignal(signal.SIGINT)
+old_sigterm_handler = signal.getsignal(signal.SIGTERM)
 
 
-# TODO implement SSDP advertisement of some sort in sdwui api to allow extension to automatically discover workers?
-# TODO see if the current api has some sort of UUID generation functionality.
-
+# TODO implement advertisement of some sort in sdwui api to allow extension to automatically discover workers?
 # noinspection PyMissingOrEmptyDocstring
 class Script(scripts.Script):
     worker_threads: List[Thread] = []
@@ -362,3 +365,21 @@ class Script(scripts.Script):
         Script.add_to_gallery(processed, p)
         Script.runs_since_init += 1
         return processed
+
+    @staticmethod
+    def signal_handler(sig, frame):
+        logger.debug("handling interrupt signal")
+        # do cleanup
+        Script.world.save_config()
+
+        if sig == signal.SIGINT:
+            if callable(old_sigint_handler):
+                old_sigint_handler(sig, frame)
+        else:
+            if callable(old_sigterm_handler):
+                old_sigterm_handler(sig, frame)
+            else:
+                sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)

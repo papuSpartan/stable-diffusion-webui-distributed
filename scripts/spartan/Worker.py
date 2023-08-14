@@ -239,7 +239,6 @@ class Worker:
         eta = self.batch_eta(payload=pseudo_payload, quiet=True)
         return eta
 
-    # TODO separate network latency from total eta error
     def batch_eta(self, payload: dict, quiet: bool = False) -> float:
         """estimate how long it will take to generate <batch_size> images on a worker in seconds"""
         steps = payload['steps']
@@ -274,8 +273,6 @@ class Worker:
                 logger.warning(f"Sampler '{payload['sampler_name']}' efficiency is not recorded.\n")
                 # in this case the sampler will be treated as having the same efficiency as Euler a
 
-        # TODO save and load each workers MPE before the end of session to workers.json.
-        #  That way initial estimations are more accurate from the second sdwui session onward
         # adjust for a known inaccuracy in our estimation of this worker using average percent error
         if len(self.eta_percent_error) > 0:
             correction = eta * (self.eta_mpe() / 100)
@@ -303,7 +300,6 @@ class Worker:
         """
         eta = None
 
-        # TODO detect remote out of memory exception and restart or garbage collect instance using api?
         try:
             self.state = self.State.WORKING
 
