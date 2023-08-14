@@ -99,7 +99,7 @@ class Script(scripts.Script):
                     negative_prompt = image_info_post['negative_prompt']
             except IndexError:
                 # like with controlnet masks, there isn't always full post-gen info, so we use the first images'
-                logger.debug(f"Image at index {i} for '{job.worker.uuid}' was missing some post-generation data")
+                logger.debug(f"Image at index {i} for '{job.worker.label}' was missing some post-generation data")
                 processed_inject_image(image=image, info_index=0, response=response)
                 return
 
@@ -165,17 +165,17 @@ class Script(scripts.Script):
                 images: json = job.worker.response["images"]
                 # if we for some reason get more than we asked for
                 if (job.batch_size * p.n_iter) < len(images):
-                    logger.debug(f"Requested {job.batch_size} image(s) from '{job.worker.uuid}', got {len(images)}")
+                    logger.debug(f"Requested {job.batch_size} image(s) from '{job.worker.label}', got {len(images)}")
 
                 if donor_worker is None:
                     donor_worker = job.worker
             except KeyError:
                 if job.batch_size > 0:
-                    logger.warning(f"Worker '{job.worker.uuid}' had no images")
+                    logger.warning(f"Worker '{job.worker.label}' had no images")
                 continue
             except TypeError as e:
                 if job.worker.response is None:
-                    logger.error(f"worker '{job.worker.uuid}' had no response")
+                    logger.error(f"worker '{job.worker.label}' had no response")
                 else:
                     logger.exception(e)
                 continue
@@ -261,7 +261,7 @@ class Script(scripts.Script):
                 # for arg in p.script_args[script.args_from:script.args_to]:
                 #     args_script_pack[title]["args"].append(arg)
                 # packed_script_args.append(args_script_pack)
-                # # https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111/issues/12#issuecomment-1480382514
+                # https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111/issues/12#issuecomment-1480382514
                 if Script.runs_since_init < 1:
                     incompat_list.append(title)
 
@@ -292,7 +292,7 @@ class Script(scripts.Script):
         # TODO api for some reason returns 200 even if something failed to be set.
         #  for now we may have to make redundant GET requests to check if actually successful...
         #  https://github.com/AUTOMATIC1111/stable-diffusion-webui/issues/8146
-        name = re.sub(r'\s?\[[^\]]*\]$', '', opts.data["sd_model_checkpoint"])
+        name = re.sub(r'\s?\[[^]]*]$', '', opts.data["sd_model_checkpoint"])
         vae = opts.data["sd_vae"]
         option_payload = {
             "sd_model_checkpoint": name,
@@ -325,7 +325,8 @@ class Script(scripts.Script):
             payload_temp['subseed'] += prior_images
             payload_temp['seed'] += prior_images if payload_temp['subseed_strength'] == 0 else 0
             logger.debug(
-                f"'{job.worker.uuid}' job's given starting seed is {payload_temp['seed']} with {prior_images} coming before it")
+                f"'{job.worker.label}' job's given starting seed is "
+                f"{payload_temp['seed']} with {prior_images} coming before it")
 
             if job.worker.loaded_model != name or job.worker.loaded_vae != vae:
                 sync = True
@@ -333,7 +334,7 @@ class Script(scripts.Script):
                 job.worker.loaded_vae = vae
 
             t = Thread(target=job.worker.request, args=(payload_temp, option_payload, sync,),
-                       name=f"{job.worker.uuid}_request")
+                       name=f"{job.worker.label}_request")
 
             t.start()
             Script.worker_threads.append(t)

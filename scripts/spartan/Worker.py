@@ -31,14 +31,26 @@ class InvalidWorkerResponse(Exception):
 
 
 class Model(BaseModel):
-    avg_ipm: float | None = Field(title='Average Speed', description='the speed of a device measured in ipm(images per minute)', ge=0)
+    avg_ipm: float | None = Field(
+        title='Average Speed',
+        description='the speed of a device measured in ipm(images per minute)',
+        ge=0
+    )
     master: bool = Field(description="whether or not an instance is the master(local) node", default=False)
     address: Optional[str] = Field(default='localhost')
     port: Optional[int] = Field(default=7860, ge=0, le=65535)
-    last_mpe: Optional[float] = Field(title='Last Mean Percent Error', description='The MPE of eta predictions in the last session')
-    tls: Optional[bool] = Field(title='Transport Layer Security', description='Whether or not to make requests to a worker securely', default=False)
+    last_mpe: Optional[float] = Field(
+        title='Last Mean Percent Error',
+        description='The MPE of eta predictions in the last session'
+    )
+    tls: Optional[bool] = Field(
+        title='Transport Layer Security',
+        description='Whether or not to make requests to a worker securely',
+        default=False
+    )
     state: Optional[Any] = Field(default=1, description="The last known state of this worker. 1 = IDLE, 5 = DISABLED")
     # auth
+
 
 class Worker:
     """
@@ -48,17 +60,16 @@ class Worker:
             address (str): The address of the worker node. Can be an ip or a FQDN. Defaults to None.
             port (int): The port number used by the worker node. Defaults to None.
             avg_ipm (int): The average images per minute of the node. Defaults to None.
-            uuid (str): The unique identifier/name of the worker node. Defaults to None.
+            label (str): The name of the worker node. Defaults to None.
             queried (bool): Whether this worker's memory status has been polled yet. Defaults to False.
             verify_remotes (bool): Whether to verify the validity of remote worker certificates. Defaults to False.
             master (bool): Whether this worker is the master node. Defaults to False.
-            auth (str|None): The username and password used to authenticate with the worker. Defaults to None. (username:password)
+            auth (str|None): The username and password used to authenticate with the worker.
+            Defaults to None. (username:password)
             benchmarked (bool): Whether this worker has been benchmarked. Defaults to False.
-            # TODO should be the last MPE from the last session
             eta_percent_error (List[float]): A runtime list of ETA percent errors for this worker. Empty by default
-            last_mpe (float): The last mean percent error for this worker. Defaults to None.
             response (requests.Response): The last response from this worker. Defaults to None.
-            
+
         Raises:
             InvalidWorkerResponse: If the worker responds with an invalid or unexpected response.
         """
@@ -70,25 +81,6 @@ class Worker:
         UNAVAILABLE = 4
         DISABLED = 5
 
-    address: Union[str, None] = None
-    port: int = 7860
-    avg_ipm: Union[float, None] = None
-    uuid: Union[str, None] = None
-    queried: bool = False  # whether this worker has been connected to yet
-    free_vram: int = 0
-    verify_remotes: bool = False
-    master: bool = False
-    benchmarked: bool = False
-    eta_percent_error: List[float] = []
-    last_mpe: Union[float, None] = None
-    response: Union[requests.Response, None] = None
-    loaded_model: Union[str, None] = None
-    loaded_vae: Union[str, None] = None
-    state: Union[State, None] = None
-    tls: bool = False
-    auth: Union[Tuple[str, str], None] = None
-    user: Union[str, None] = None
-    password: Union[str, None] = None
     # Percentages representing (roughly) how much faster a given sampler is in comparison to Euler A.
     # We compare to euler a because that is what we currently benchmark each node with.
     other_to_euler_a = {
@@ -112,22 +104,32 @@ class Worker:
         "PLMS": 9.31
     }
 
-    def __init__(self, address: Union[str, None] = None, port: int = 7860, uuid: Union[str, None] = None, verify_remotes: bool = True,
-                 master: bool = False, tls: bool = False, auth: Union[str, None, Tuple, List] = None, state: int = 1):
-        """
-        Creates a new worker object.
+    def __init__(self, address: Union[str, None] = None, port: int = 7860, label: Union[str, None] = None,
+                 verify_remotes: bool = True, master: bool = False, tls: bool = False,
+                 auth: Union[str, None, Tuple, List] = None, state: int = 1,
+                 avg_ipm: float = 1.0, last_mpe: float = None
+                 ):
 
-        param address: The address of the worker node. Can be an ip or a FQDN. Defaults to None. do NOT include sdapi/v1 in the address.
-        param port: The port number used by the worker node. Defaults to 80. (http) or 443 (https)
-        param uuid: The unique identifier/name of the worker node. Defaults to None.
-        param verify_remotes: Whether to verify the validity of remote worker certificates. Defaults to True.
-        param master: Whether this worker is the master node. Defaults to False.
-        param tls: Whether to use https. Defaults to False, automatically set to True if address starts with https://
-        param auth: The username and password used to authenticate with the worker. Defaults to None. (username:password)
-        """
+        self.avg_ipm = avg_ipm
+        self.state = self.State(state)
+        self.eta_percent_error = [last_mpe] if last_mpe is not None else []
+        self.address = address
+        self.port = port
+        self.response_time = None
+        self.loaded_model = ''
+        self.loaded_vae = ''
+        self.label = label
+        self.tls = tls
+        self.verify_remotes = verify_remotes
+        self.model_override: Union[str, None] = None
+        self.free_vram: int = 0
+        self.response = None
+        self.queried = False
+
+        # master specific setup
         if master is True:
             self.master = master
-            self.uuid = 'master'
+            self.label = 'master'
 
             # right now this is really only for clarity while debugging:
             self.address = server_name if server_name is not None else 'localhost'
@@ -136,8 +138,10 @@ class Worker:
             else:
                 self.port = cmd_opts.port
             return
+        else:
+            self.master = False
+
         # strip http:// or https:// from address if present
-        self.tls = tls
         if address is not None:
             if address.startswith("http://"):
                 address = address[7:]
@@ -149,20 +153,8 @@ class Worker:
                 address = address[:-1]
         else:
             raise InvalidWorkerResponse("Worker address cannot be None")
-        self.address = address
-        self.port = port
-        self.response_time = None
-        self.loaded_model = ''
-        self.loaded_vae = ''
 
-        if state is None:
-            self.state = self.State.IDLE
-        else:
-            self.state = self.State(state)
-
-        self.tls = tls
-        self.model_override: Union[str, None] = None
-        self.free_vram: int = 0
+        # auth
         self.user = None
         self.password = None
         if auth is not None:
@@ -175,20 +167,18 @@ class Worker:
             else:
                 raise ValueError(f"Invalid auth value: {auth}")
         self.auth: Union[Tuple[str, str], None] = (self.user, self.password) if self.user is not None else None
-        if uuid is not None:
-            self.uuid = uuid
 
-        # requests session vars
+        # requests session
         self.session = requests.Session()
         self.session.auth = self.auth
-        # wish I could just do this but it doesn't seem to work https://github.com/psf/requests/issues/2255
+        # wish I could just do this, but it doesn't seem to work https://github.com/psf/requests/issues/2255
         # self.session.verify = not verify_remotes
 
     def __str__(self):
         return f"{self.address}:{self.port}"
 
     def __repr__(self):
-        return f"'{self.uuid}'@{self.address}:{self.port}, speed: {self.avg_ipm} ipm, state: {self.state}"
+        return f"'{self.label}'@{self.address}:{self.port}, speed: {self.avg_ipm} ipm, state: {self.state}"
 
     @property
     def model(self) -> Model:
@@ -291,8 +281,8 @@ class Worker:
             correction = eta * (self.eta_mpe() / 100)
 
             if not quiet:
-                logger.debug(f"worker '{self.uuid}'s last ETA was off by {correction:.2f}%")
-            correction_summary = f"correcting '{self.uuid}'s ETA: {eta:.2f}s -> "
+                logger.debug(f"worker '{self.label}'s last ETA was off by {correction:.2f}%")
+            correction_summary = f"correcting '{self.label}'s ETA: {eta:.2f}s -> "
             # do regression
             eta -= correction
 
@@ -329,14 +319,14 @@ class Worker:
                     memory_response = memory_response['cuda']['system']  # all in bytes
                     free_vram = int(memory_response['free']) / (1024 * 1024 * 1024)
                     total_vram = int(memory_response['total']) / (1024 * 1024 * 1024)
-                    logger.debug(f"Worker '{self.uuid}' {free_vram:.2f}/{total_vram:.2f} GB VRAM free\n")
+                    logger.debug(f"Worker '{self.label}' {free_vram:.2f}/{total_vram:.2f} GB VRAM free\n")
                     self.free_vram = memory_response['free']
                 except KeyError:
                     try:
                         error = memory_response['cuda']['error']
-                        logger.warning(f"CUDA doesn't seem to be available for worker '{self.uuid}'\nError: {error}")
+                        logger.warning(f"CUDA doesn't seem to be available for worker '{self.label}'\nError: {error}")
                     except KeyError:
-                        logger.error(f"An error occurred querying memory statistics from worker '{self.uuid}'\n"
+                        logger.error(f"An error occurred querying memory statistics from worker '{self.label}'\n"
                                      f"{memory_response}")
 
             if sync_options is True:
@@ -350,8 +340,9 @@ class Worker:
 
             if self.benchmarked:
                 eta = self.batch_eta(payload=payload) * payload['n_iter']
-                logger.debug(f"worker '{self.uuid}' predicts it will take {eta:.3f}s to generate {payload['batch_size'] * payload['n_iter']} image("
-                      f"s) at a speed of {self.avg_ipm:.2f} ipm\n")
+                logger.debug(f"worker '{self.label}' predicts it will take {eta:.3f}s to generate "
+                             f"{payload['batch_size'] * payload['n_iter']} image(s) "
+                             f"at a speed of {self.avg_ipm:.2f} ipm\n")
 
             try:
                 # remove anything that is not serializable
@@ -422,7 +413,9 @@ class Worker:
 
                 self.response = response.json()
                 if response.status_code != 200:
-                    logger.error(f"'{self.uuid}' response: Code <{response.status_code}> {str(response.content, 'utf-8')}")
+                    logger.error(
+                        f"'{self.label}' response: Code <{response.status_code}> "
+                        f"{str(response.content, 'utf-8')}")
                     self.response = None
                     raise InvalidWorkerResponse()
 
@@ -431,7 +424,7 @@ class Worker:
                     self.response_time = time.time() - start
                     variance = ((eta - self.response_time) / self.response_time) * 100
 
-                    logger.debug(f"Worker '{self.uuid}'s ETA was off by {variance:.2f}%.\n"
+                    logger.debug(f"Worker '{self.label}'s ETA was off by {variance:.2f}%.\n"
                                  f"Predicted {eta:.2f}s. Actual: {self.response_time:.2f}s\n")
 
                     # if the variance is greater than 500% then we ignore it to prevent variation inflation
@@ -472,7 +465,7 @@ class Worker:
         samples = 2  # number of times to benchmark the remote / accuracy
 
         if self.state == self.State.DISABLED or self.state == self.State.UNAVAILABLE:
-            logger.debug(f"worker '{self.uuid}' is unavailable or disabled, refusing to benchmark")
+            logger.debug(f"worker '{self.label}' is unavailable or disabled, refusing to benchmark")
             return 0
 
         if self.master is True:
@@ -500,7 +493,8 @@ class Worker:
                 self.response = None
                 return 0
 
-            t = Thread(target=self.request, args=(sh.benchmark_payload, None, False,), name=f"{self.uuid}_benchmark_request")
+            t = Thread(target=self.request, args=(sh.benchmark_payload, None, False,),
+                       name=f"{self.label}_benchmark_request")
             try:  # if the worker is unreachable/offline then handle that here
                 t.start()
                 start = time.time()
@@ -511,11 +505,11 @@ class Worker:
                 raise e
 
             if i >= warmup_samples:
-                logger.info(f"Sample {i - warmup_samples + 1}: Worker '{self.uuid}'({self}) "
+                logger.info(f"Sample {i - warmup_samples + 1}: Worker '{self.label}'({self}) "
                             f"- {sample_ipm:.2f} image(s) per minute\n")
                 results.append(sample_ipm)
             elif i == warmup_samples - 1:
-                logger.debug(f"{self.uuid} finished warming up\n")
+                logger.debug(f"{self.label} finished warming up\n")
 
         # average the sample results for accuracy
         ipm_sum = 0
@@ -523,7 +517,7 @@ class Worker:
             ipm_sum += ipm_result
         avg_ipm_result = ipm_sum / samples
 
-        logger.debug(f"Worker '{self.uuid}' average ipm: {avg_ipm_result}")
+        logger.debug(f"Worker '{self.label}' average ipm: {avg_ipm_result}")
         self.avg_ipm = avg_ipm_result
         self.response = None
         self.benchmarked = True
@@ -544,10 +538,10 @@ class Worker:
             )
 
             if model_response.status_code != 200:
-                logger.error(f"Failed to refresh models for worker '{self.uuid}'\nCode <{model_response.status_code}>")
+                logger.error(f"Failed to refresh models for worker '{self.label}'\nCode <{model_response.status_code}>")
 
             if lora_response.status_code != 200:
-                logger.error(f"Failed to refresh LORA's for worker '{self.uuid}'\nCode <{lora_response.status_code}>")
+                logger.error(f"Failed to refresh LORA's for worker '{self.label}'\nCode <{lora_response.status_code}>")
         except requests.exceptions.ConnectionError:
             self.mark_unreachable()
 
@@ -561,7 +555,7 @@ class Worker:
 
             if response.status_code == 200:
                 self.state = self.State.INTERRUPTED
-                logger.debug(f"successfully interrupted worker {self.uuid}")
+                logger.debug(f"successfully interrupted worker {self.label}")
         except requests.exceptions.ConnectionError:
             self.mark_unreachable()
 
@@ -583,9 +577,9 @@ class Worker:
 
     def mark_unreachable(self):
         if self.state == self.State.DISABLED:
-            logger.debug(f"worker '{self.uuid}' is disabled... refusing to mark as unavailable")
+            logger.debug(f"worker '{self.label}' is disabled... refusing to mark as unavailable")
         else:
-            logger.error(f"worker '{self.uuid}' at {self} was unreachable, will avoid in the future")
+            logger.error(f"worker '{self.label}' at {self} was unreachable, will avoid in the future")
             self.state = self.State.UNAVAILABLE
 
     def available_models(self) -> Union[List[str], None]:
@@ -603,7 +597,7 @@ class Worker:
             if response.status_code != 200:
                 logger.error(f"request to {url} returned {response.status_code}")
                 if response.status_code == 404:
-                    logger.error(f"did you enable --api for '{self.uuid}'?")
+                    logger.error(f"did you enable --api for '{self.label}'?")
                 return None
 
             titles = [model['title'] for model in response.json()]
@@ -613,7 +607,7 @@ class Worker:
             return None
 
     def load_options(self, model, vae=None):
-        model_name = re.sub(r'\s?\[[^\]]*\]$', '', model)
+        model_name = re.sub(r'\s?\[[^]]*]$', '', model)
         payload = {
             "sd_model_checkpoint": model_name
         }
@@ -627,7 +621,7 @@ class Worker:
         )
 
         if response.status_code != 200:
-            logger.debug(f"failed to load options for worker '{self.uuid}'")
+            logger.debug(f"failed to load options for worker '{self.label}'")
         else:
             self.loaded_model = model_name
             if vae is not None:

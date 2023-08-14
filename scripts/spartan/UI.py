@@ -1,7 +1,5 @@
-import io
 import os
 import subprocess
-import threading
 from pathlib import Path
 import gradio
 from .shared import logger, log_level
@@ -14,6 +12,7 @@ worker_select_dropdown = None
 
 
 class UI:
+    """extension user interface related things"""
 
     def __init__(self, script, world):
         self.script = script
@@ -22,6 +21,7 @@ class UI:
     # handlers
     @staticmethod
     def user_script_btn():
+        """executes a script placed by the user at <extension>/user/sync*"""
         user_scripts = Path(os.path.abspath(__file__)).parent.parent.joinpath('user')
 
         for file in user_scripts.iterdir():
@@ -45,15 +45,18 @@ class UI:
         return False
 
     def benchmark_btn(self):
+        """benchmarks all registered workers that aren't unavailable"""
         logger.info("Redoing benchmarks...")
         self.world.benchmark(rebenchmark=True)
 
-    def clear_queue_btn(self):
+    @staticmethod
+    def clear_queue_btn():
+        """debug utility that will clear the internal webui queue. sometimes good for jams"""
         logger.debug(webui_state.__dict__)
         webui_state.end()
 
-
     def status_btn(self):
+        """updates a simplified overview of registered workers and their jobs"""
         worker_status = ''
         workers = self.world._workers
 
@@ -61,7 +64,7 @@ class UI:
             if worker.master:
                 continue
 
-            worker_status += f"{worker.uuid} at {worker.address} is {worker.state.name}\n"
+            worker_status += f"{worker.label} at {worker.address} is {worker.state.name}\n"
 
         # TODO replace this with a single check to a state flag that we should make in the world class
         for worker in workers:
@@ -71,14 +74,16 @@ class UI:
         return 'No active jobs!', worker_status
 
     def save_btn(self, thin_client_mode, job_timeout):
+        """updates the options visible on the settings tab"""
+
         self.world.thin_client_mode = thin_client_mode
         logger.debug(f"thin client mode is now {thin_client_mode}")
         job_timeout = int(job_timeout)
         self.world.job_timeout = job_timeout
         logger.debug(f"job timeout is now {job_timeout} seconds")
 
-    def save_worker_btn(self, name, address, port, tls, disabled):
-        # TODO refactor uuid field, add auth fields
+    def save_worker_btn(self, label, address, port, tls, disabled):
+        """creates or updates the worker selected in the worker config tab"""
 
         # determine what state to save
         # if updating a pre-existing worker then grab its current state
@@ -86,12 +91,12 @@ class UI:
         if disabled:
             state = Worker.State.DISABLED
         else:
-            original = self.world[name]
+            original = self.world[label]
             if original is not None:
-                state = original.state
+                state = original.state if original.state != Worker.State.DISABLED else Worker.State.IDLE
 
         self.world.add_worker(
-            uuid=name,
+            label=label,
             address=address,
             port=port,
             tls=tls,
@@ -100,34 +105,37 @@ class UI:
         self.world.save_config()
 
         # visibly update which workers can be selected
-        labels = [worker.uuid for worker in self.selectable_remote_workers()]
+        labels = [worker.label for worker in self.selectable_remote_workers()]
         return gradio.Dropdown.update(choices=labels)
 
     def selectable_remote_workers(self) -> List[Worker]:
+        """gets a list of all registered remote workers"""
         remote_workers = []
 
         for worker in self.world._workers:
             if worker.master:
                 continue
             remote_workers.append(worker)
-        remote_workers = sorted(remote_workers, key=lambda x: x.uuid)
+        remote_workers = sorted(remote_workers, key=lambda x: x.label)
 
         return remote_workers
 
     def remove_worker_btn(self, worker_label):
+        """removes, from disk and memory, whatever worker is selected on the worker config tab"""
         # remove worker from memory
         for worker in self.world._workers:
-            if worker.uuid == worker_label:
+            if worker.label == worker_label:
                 self.world._workers.remove(worker)
 
         # remove worker from disk
         self.world.save_config()
 
         # visibly update which workers can be selected
-        labels = [x.uuid for x in self.selectable_remote_workers()]
+        labels = [x.label for x in self.selectable_remote_workers()]
         return gradio.Dropdown.update(choices=labels)
 
     def populate_worker_config_from_selection(self, selection):
+        """populates the ui components on the worker config tab with the current values of the selected worker"""
         avail_models = None
         selected_worker = self.world[selection]
 
@@ -143,8 +151,8 @@ class UI:
             gradio.Checkbox.update(value=True if selected_worker.state == Worker.State.DISABLED else False)
         ]
 
-
     def override_worker_model(self, model, worker_label):
+        """forces a worker to always use the selected model in future requests"""
         worker = self.world[worker_label]
 
         if model == "None":
@@ -155,10 +163,9 @@ class UI:
             # set model on remote early
             Thread(target=worker.load_options, args=(model,)).start()
 
-
     # end handlers
-
     def create_ui(self):
+        """creates the extension UI within a gradio.Box() and returns it"""
         with gradio.Box() as root:
             with gradio.Accordion(label='Distributed', open=False):
                 with gradio.Tab('Status') as status_tab:
@@ -205,7 +212,7 @@ class UI:
 
                 with gradio.Tab('Worker Config'):
                     worker_select_dropdown = gradio.Dropdown(
-                    [x.uuid for x in self.selectable_remote_workers()],
+                        [x.label for x in self.selectable_remote_workers()],
                         info='Select a pre-existing worker or enter a label for a new one',
                         label='Label',
                         allow_custom_value=True
@@ -221,18 +228,33 @@ class UI:
 
                     with gradio.Accordion(label='Advanced'):
                         model_override_dropdown = gradio.Dropdown(label='Model override')
-                        model_override_dropdown.select(self.override_worker_model, inputs=[model_override_dropdown, worker_select_dropdown])
+                        model_override_dropdown.select(self.override_worker_model,
+                                                       inputs=[model_override_dropdown, worker_select_dropdown])
 
                     with gradio.Row():
                         save_worker_btn = gradio.Button(value='Add/Update Worker')
-                        save_worker_btn.click(self.save_worker_btn, inputs=[worker_select_dropdown, worker_address_field, worker_port_field, worker_tls_cbx, worker_disabled_cbx], outputs=[worker_select_dropdown])
+                        save_worker_btn.click(self.save_worker_btn,
+                                              inputs=[worker_select_dropdown,
+                                                      worker_address_field,
+                                                      worker_port_field,
+                                                      worker_tls_cbx,
+                                                      worker_disabled_cbx],
+                                              outputs=[worker_select_dropdown]
+                                              )
                         remove_worker_btn = gradio.Button(value='Remove Worker', variant='stop')
-                        remove_worker_btn.click(self.remove_worker_btn, inputs=worker_select_dropdown, outputs=[worker_select_dropdown])
+                        remove_worker_btn.click(self.remove_worker_btn, inputs=worker_select_dropdown,
+                                                outputs=[worker_select_dropdown])
 
                     worker_select_dropdown.select(
                         self.populate_worker_config_from_selection,
                         inputs=worker_select_dropdown,
-                        outputs=[worker_address_field, worker_port_field, worker_tls_cbx, model_override_dropdown, worker_disabled_cbx]
+                        outputs=[
+                            worker_address_field,
+                            worker_port_field,
+                            worker_tls_cbx,
+                            model_override_dropdown,
+                            worker_disabled_cbx
+                        ]
                     )
 
                 with gradio.Tab('Settings'):

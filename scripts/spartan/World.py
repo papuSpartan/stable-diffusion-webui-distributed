@@ -54,7 +54,7 @@ class Job:
 
     def __str__(self):
         prefix = ''
-        suffix = f"Job: {self.batch_size} images. Owned by '{self.worker.uuid}'. Rate: {self.worker.avg_ipm}ipm"
+        suffix = f"Job: {self.batch_size} images. Owned by '{self.worker.label}'. Rate: {self.worker.avg_ipm}ipm"
         if self.complementary:
             prefix = "(complementary) "
 
@@ -93,7 +93,7 @@ class World:
 
     def __getitem__(self, label: str) -> Worker:
         for worker in self._workers:
-            if worker.uuid == label:
+            if worker.label == label:
                 return worker
 
     def __repr__(self):
@@ -166,14 +166,14 @@ class World:
             InvalidWorkerResponse: If the worker is not valid.
         """
 
-        original = self[kwargs['uuid']]  # if worker doesn't already exist then just make a new one
+        original = self[kwargs['label']]  # if worker doesn't already exist then just make a new one
         if original is None:
             new = Worker(**kwargs)
             self._workers.append(Worker(**kwargs))
             return new
         else:
             for key in kwargs:
-                attribute = getattr(original, key)
+                attribute = getattr(original, key, None)
                 if attribute is not None:
                     setattr(original, key, kwargs[key])
 
@@ -218,17 +218,17 @@ class World:
 
             for worker in self._workers:
                 if worker.avg_ipm is None or worker.avg_ipm <= 0:
-                    logger.debug(f"recorded speed for worker '{worker.uuid}' is invalid")
+                    logger.debug(f"recorded speed for worker '{worker.label}' is invalid")
                     unbenched_workers.append(worker)
                 else:
                     worker.benchmarked = True
 
         # benchmark those that haven't been
         for worker in unbenched_workers:
-            t = Thread(target=benchmark_wrapped, args=(worker, ), name=f"{worker.uuid}_benchmark")
+            t = Thread(target=benchmark_wrapped, args=(worker, ), name=f"{worker.label}_benchmark")
             benchmark_threads.append(t)
             t.start()
-            logger.info(f"benchmarking worker '{worker.uuid}'")
+            logger.info(f"benchmarking worker '{worker.label}'")
 
         # wait for all benchmarks to finish and update stats on newly benchmarked workers
         if len(benchmark_threads) > 0:
@@ -266,7 +266,7 @@ class World:
         i = 1
         output = "World composition:\n"
         for worker in workers_copy:
-            output += f"{i}. '{worker.uuid}'({worker}) - {worker.avg_ipm:.2f} ipm\n"
+            output += f"{i}. '{worker.label}'({worker}) - {worker.avg_ipm:.2f} ipm\n"
             i += 1
         output += f"total: ~{total_ipm:.2f} ipm"
 
@@ -373,7 +373,7 @@ class World:
         for worker in self.get_workers():
             if worker.state != Worker.State.DISABLED and worker.state != Worker.State.UNAVAILABLE:
                 if worker.avg_ipm is None or worker.avg_ipm <= 0:
-                    logger.debug(f"No recorded speed for worker '{worker.uuid}, benchmarking'")
+                    logger.debug(f"No recorded speed for worker '{worker.label}, benchmarking'")
                     worker.benchmark()
 
                 self.jobs.append(Job(worker=worker, batch_size=batch_size))
@@ -382,7 +382,7 @@ class World:
         filtered: List[Worker] = []
         for worker in self._workers:
             if worker.avg_ipm is not None and worker.avg_ipm <= 0:
-                logger.warning(f"config reports invalid speed (0 ipm) for worker '{worker.uuid}', setting default of 1 ipm.\nplease re-benchmark")
+                logger.warning(f"config reports invalid speed (0 ipm) for worker '{worker.label}', setting default of 1 ipm.\nplease re-benchmark")
                 worker.avg_ipm = 1
                 continue
             if worker.master and self.thin_client_mode:
@@ -413,7 +413,7 @@ class World:
                 images_checked += payload['batch_size']
                 continue
 
-            logger.debug(f"worker '{job.worker.uuid}' would stall the image gallery by ~{lag:.2f}s\n")
+            logger.debug(f"worker '{job.worker.label}' would stall the image gallery by ~{lag:.2f}s\n")
             job.complementary = True
             if deferred_images + images_checked + payload['batch_size'] > self.total_batch_size:
                 logger.debug(f"would go over actual requested size")
@@ -463,7 +463,7 @@ class World:
 
             slowest_active_worker = self.slowest_realtime_job().worker
             slack_time = slowest_active_worker.batch_eta(payload=payload)
-            logger.debug(f"There's {slack_time:.2f}s of slack time available for worker '{job.worker.uuid}'")
+            logger.debug(f"There's {slack_time:.2f}s of slack time available for worker '{job.worker.label}'")
 
             # in the case that this worker is now taking on what others workers would have been (if they were real-time)
             # this means that there will be more slack time for complementary nodes
@@ -482,7 +482,7 @@ class World:
         iterations = payload['n_iter']
         distro_summary += f"{self.total_batch_size} * {iterations} iteration(s): {self.total_batch_size * iterations} images total\n"
         for job in self.jobs:
-            distro_summary += f"'{job.worker.uuid}' - {job.batch_size * iterations} image(s) @ {job.worker.avg_ipm:.2f} ipm\n"
+            distro_summary += f"'{job.worker.label}' - {job.batch_size * iterations} image(s) @ {job.worker.avg_ipm:.2f} ipm\n"
         logger.info(distro_summary)
 
         # delete any jobs that have no work
@@ -545,18 +545,10 @@ class World:
 
         for w in config.workers:
             label = next(iter(w.keys()))
-            fields = w[label]
+            fields = w[label].__dict__
+            fields['label'] = label
 
-            worker = self.add_worker(
-                uuid=label,
-                address=fields.address,
-                port=fields.port,
-                tls=fields.tls,
-                master=fields.master,
-                state=fields.state
-            )
-            worker.last_mpe = fields.last_mpe
-            worker.avg_ipm = fields.avg_ipm
+            self.add_worker(**fields)
 
         logger.debug("config loaded")
 
@@ -566,7 +558,7 @@ class World:
         """
 
         config = Config_Model(
-            workers=[{worker.uuid: worker.model.dict()} for worker in self._workers],
+            workers=[{worker.label: worker.model.dict()} for worker in self._workers],
             benchmark_payload=sh.benchmark_payload
         )
 
@@ -579,13 +571,13 @@ class World:
             if worker.master:
                 continue
             if worker.state == Worker.State.DISABLED:
-                logger.debug(f"refusing to ping disabled worker '{worker.uuid}'")
+                logger.debug(f"refusing to ping disabled worker '{worker.label}'")
 
             if worker.state == Worker.State.UNAVAILABLE:
-                logger.debug(f"checking if worker '{worker.uuid}' is now reachable...")
+                logger.debug(f"checking if worker '{worker.label}' is now reachable...")
                 reachable = worker.reachable()
                 if reachable:
-                    logger.info(f"worker '{worker.uuid}' is now online, marking as available")
+                    logger.info(f"worker '{worker.label}' is now online, marking as available")
                     worker.state = Worker.State.IDLE
                 else:
-                    logger.info(f"worker '{worker.uuid}' is still unreachable")
+                    logger.info(f"worker '{worker.label}' is still unreachable")
