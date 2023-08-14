@@ -9,17 +9,18 @@ import copy
 import json
 import os
 import time
-from typing import List, Union
+from typing import List, Dict, Union
 from threading import Thread
 from inspect import getsourcefile
 from os.path import abspath
 from pathlib import Path
 from modules.processing import process_images, StableDiffusionProcessingTxt2Img
 import modules.shared as shared
-from .Worker import Worker, State
+from .Worker import Worker, Model
 from .shared import logger, warmup_samples
 from . import shared as sh
-from . import models
+from pydantic import BaseModel, Field
+from .shared import benchmark_payload
 
 
 class NotBenchmarked(Exception):
@@ -60,6 +61,11 @@ class Job:
         return prefix + suffix
 
 
+class Config_Model(BaseModel):
+    workers: List[Dict[str, Model]]
+    benchmark_payload: Dict = Field(default=benchmark_payload, description='the payload used when benchmarking a node')
+
+
 class World:
     """
     The frame or "world" which holds all workers (including the local machine).
@@ -89,6 +95,9 @@ class World:
         for worker in self._workers:
             if worker.uuid == label:
                 return worker
+
+    def __repr__(self):
+        return f"{len(self._workers)} workers"
 
     def update_world(self, total_batch_size):
         """
@@ -146,39 +155,27 @@ class World:
 
         raise Exception("Master job not found")
 
-    # TODO better way of merging/updating workers
-    def add_worker(self, uuid: str, address: str, port: int, auth: Union[str, None] = None, tls: bool = False, master: bool = False):
+    def add_worker(self, **kwargs):
         """
         Registers a worker with the world.
 
-        Args:
-            uuid (str): The name or unique identifier.
-            address (str): The ip or FQDN.
-            port (int): The port number.
-            auth (str): The authentication, example 'username:password'.
-            tls (bool): Whether to use TLS. Automatically set if address is https.
-            master (bool): Whether the worker is the local/master worker.
-        
         Returns:
             Worker: The worker object.
         
         Raises:
             InvalidWorkerResponse: If the worker is not valid.
         """
-        original = None
-        new = Worker(uuid=uuid, address=address, port=port, verify_remotes=self.verify_remotes, tls=tls, auth=auth, master=master)
 
-        for w in self._workers:
-            if w.uuid == uuid:
-                original = w
-
+        original = self[kwargs['uuid']]  # if worker doesn't already exist then just make a new one
         if original is None:
-            self._workers.append(new)
+            new = Worker(**kwargs)
+            self._workers.append(Worker(**kwargs))
             return new
         else:
-            original.address = address
-            original.port = port
-            original.tls = tls
+            for key in kwargs:
+                attribute = getattr(original, key)
+                if attribute is not None:
+                    setattr(original, key, kwargs[key])
 
             return original
 
@@ -237,7 +234,7 @@ class World:
         if len(benchmark_threads) > 0:
             for t in benchmark_threads:
                 t.join()
-            logger.info("Benchmarking finished")
+            logger.info("benchmarking finished")
 
             # save benchmark results to workers.json
             self.save_config()
@@ -374,10 +371,12 @@ class World:
 
         batch_size = self.default_batch_size()
         for worker in self.get_workers():
-            if worker.avg_ipm is None or worker.avg_ipm <= 0:
-                logger.debug(f"No recorded speed for worker '{worker.uuid}, benchmarking'")
-                worker.benchmark()
-            self.jobs.append(Job(worker=worker, batch_size=batch_size))
+            if worker.state != Worker.State.DISABLED and worker.state != Worker.State.UNAVAILABLE:
+                if worker.avg_ipm is None or worker.avg_ipm <= 0:
+                    logger.debug(f"No recorded speed for worker '{worker.uuid}, benchmarking'")
+                    worker.benchmark()
+
+                self.jobs.append(Job(worker=worker, batch_size=batch_size))
 
     def get_workers(self):
         filtered: List[Worker] = []
@@ -388,7 +387,7 @@ class World:
                 continue
             if worker.master and self.thin_client_mode:
                 continue
-            if worker.state != State.UNAVAILABLE:
+            if worker.state != Worker.State.UNAVAILABLE and worker.state != Worker.State.DISABLED:
                 filtered.append(worker)
 
         return filtered
@@ -537,7 +536,7 @@ class World:
         This function should be called after worker command arguments are parsed.
         """
         config_raw = self.config()
-        config = models.Config(**config_raw)
+        config = Config_Model(**config_raw)
 
         # saves config schema to <extension>/distributed-config.schema.json
         # print(models.Config.schema_json())
@@ -553,8 +552,8 @@ class World:
                 address=fields.address,
                 port=fields.port,
                 tls=fields.tls,
-                auth=None,
-                master=fields.master
+                master=fields.master,
+                state=fields.state
             )
             worker.last_mpe = fields.last_mpe
             worker.avg_ipm = fields.avg_ipm
@@ -566,7 +565,7 @@ class World:
         Saves the config file.
         """
 
-        config = models.Config(
+        config = Config_Model(
             workers=[{worker.uuid: worker.model.dict()} for worker in self._workers],
             benchmark_payload=sh.benchmark_payload
         )
@@ -575,3 +574,18 @@ class World:
             config_file.write(config.json(indent=3))
             logger.debug(f"config saved")
 
+    def ping_remotes(self):
+        for worker in self._workers:
+            if worker.master:
+                continue
+            if worker.state == Worker.State.DISABLED:
+                logger.debug(f"refusing to ping disabled worker '{worker.uuid}'")
+
+            if worker.state == Worker.State.UNAVAILABLE:
+                logger.debug(f"checking if worker '{worker.uuid}' is now reachable...")
+                reachable = worker.reachable()
+                if reachable:
+                    logger.info(f"worker '{worker.uuid}' is now online, marking as available")
+                    worker.state = Worker.State.IDLE
+                else:
+                    logger.info(f"worker '{worker.uuid}' is still unreachable")

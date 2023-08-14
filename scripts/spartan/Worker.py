@@ -1,8 +1,6 @@
 import io
-
 import requests
-from requests import Session
-from typing import List, Tuple, Union
+from typing import List, Tuple, Union, Optional, Any
 import math
 import copy
 import time
@@ -17,12 +15,12 @@ from modules.api.api import encode_pil_to_base64
 import re
 from . import shared as sh
 from .shared import logger, warmup_samples
-from . import models
 try:
     from webui import server_name
 except ImportError:  # webui 95821f0132f5437ef30b0dbcac7c51e55818c18f and newer
     from modules.initialize_util import gradio_server_name
     server_name = gradio_server_name()
+from pydantic import BaseModel, Field
 
 
 class InvalidWorkerResponse(Exception):
@@ -32,12 +30,15 @@ class InvalidWorkerResponse(Exception):
     pass
 
 
-class State(Enum):
-    IDLE = 1
-    WORKING = 2
-    INTERRUPTED = 3
-    UNAVAILABLE = 4
-
+class Model(BaseModel):
+    avg_ipm: float | None = Field(title='Average Speed', description='the speed of a device measured in ipm(images per minute)', ge=0)
+    master: bool = Field(description="whether or not an instance is the master(local) node", default=False)
+    address: Optional[str] = Field(default='localhost')
+    port: Optional[int] = Field(default=7860, ge=0, le=65535)
+    last_mpe: Optional[float] = Field(title='Last Mean Percent Error', description='The MPE of eta predictions in the last session')
+    tls: Optional[bool] = Field(title='Transport Layer Security', description='Whether or not to make requests to a worker securely', default=False)
+    state: Optional[Any] = Field(default=1, description="The last known state of this worker. 1 = IDLE, 5 = DISABLED")
+    # auth
 
 class Worker:
     """
@@ -61,6 +62,13 @@ class Worker:
         Raises:
             InvalidWorkerResponse: If the worker responds with an invalid or unexpected response.
         """
+
+    class State(Enum):
+        IDLE = 1
+        WORKING = 2
+        INTERRUPTED = 3
+        UNAVAILABLE = 4
+        DISABLED = 5
 
     address: Union[str, None] = None
     port: int = 7860
@@ -105,7 +113,7 @@ class Worker:
     }
 
     def __init__(self, address: Union[str, None] = None, port: int = 7860, uuid: Union[str, None] = None, verify_remotes: bool = True,
-                 master: bool = False, tls: bool = False, auth: Union[str, None, Tuple, List] = None):
+                 master: bool = False, tls: bool = False, auth: Union[str, None, Tuple, List] = None, state: int = 1):
         """
         Creates a new worker object.
 
@@ -143,11 +151,15 @@ class Worker:
             raise InvalidWorkerResponse("Worker address cannot be None")
         self.address = address
         self.port = port
-        self.verify_remotes = verify_remotes
         self.response_time = None
         self.loaded_model = ''
         self.loaded_vae = ''
-        self.state = State.IDLE
+
+        if state is None:
+            self.state = self.State.IDLE
+        else:
+            self.state = self.State(state)
+
         self.tls = tls
         self.model_override: Union[str, None] = None
         self.free_vram: int = 0
@@ -165,23 +177,22 @@ class Worker:
         self.auth: Union[Tuple[str, str], None] = (self.user, self.password) if self.user is not None else None
         if uuid is not None:
             self.uuid = uuid
+
+        # requests session vars
         self.session = requests.Session()
         self.session.auth = self.auth
-        if self.verify_remotes:
-            # check memory/ GET response
-            response = self.session.get(
-                self.full_url("memory"),
-                verify=self.verify_remotes
-            )
-            if response.status_code != 200:
-                raise InvalidWorkerResponse(f"Worker '{self.uuid}' responded with status code {response.status_code}")
+        # wish I could just do this but it doesn't seem to work https://github.com/psf/requests/issues/2255
+        # self.session.verify = not verify_remotes
 
     def __str__(self):
         return f"{self.address}:{self.port}"
 
+    def __repr__(self):
+        return f"'{self.uuid}'@{self.address}:{self.port}, speed: {self.avg_ipm} ipm, state: {self.state}"
+
     @property
-    def model(self) -> models.Worker:
-        return models.Worker(**self.__dict__)
+    def model(self) -> Model:
+        return Model(**self.__dict__)
 
     def eta_mpe(self):
         """
@@ -304,7 +315,7 @@ class Worker:
 
         # TODO detect remote out of memory exception and restart or garbage collect instance using api?
         try:
-            self.state = State.WORKING
+            self.state = self.State.WORKING
 
             # query memory available on worker and store for future reference
             if self.queried is False:
@@ -416,7 +427,7 @@ class Worker:
                     raise InvalidWorkerResponse()
 
                 # update list of ETA accuracy if state is valid
-                if self.benchmarked and not self.state == State.INTERRUPTED:
+                if self.benchmarked and not self.state == self.State.INTERRUPTED:
                     self.response_time = time.time() - start
                     variance = ((eta - self.response_time) / self.response_time) * 100
 
@@ -437,7 +448,7 @@ class Worker:
                         logger.warning(f"Variance of {variance:.2f}% exceeds threshold of 500%. Ignoring...\n")
 
             except Exception as e:
-                self.state = State.IDLE
+                self.state = self.State.IDLE
 
                 if payload['batch_size'] == 0:
                     raise InvalidWorkerResponse("Tried to request a null amount of images")
@@ -448,7 +459,7 @@ class Worker:
             self.mark_unreachable()
             return
 
-        self.state = State.IDLE
+        self.state = self.State.IDLE
         return
 
     def benchmark(self) -> float:
@@ -459,6 +470,10 @@ class Worker:
 
         t: Thread
         samples = 2  # number of times to benchmark the remote / accuracy
+
+        if self.state == self.State.DISABLED or self.state == self.State.UNAVAILABLE:
+            logger.debug(f"worker '{self.uuid}' is unavailable or disabled, refusing to benchmark")
+            return 0
 
         if self.master is True:
             return -1
@@ -479,9 +494,9 @@ class Worker:
         results: List[float] = []
         # it used to be lower for the first couple of generations
         # this was due to something torch does at startup according to auto and is now done at sdwui startup
-        self.state = State.WORKING
+        self.state = self.State.WORKING
         for i in range(0, samples + warmup_samples):  # run some extra times so that the remote can "warm up"
-            if self.state == State.UNAVAILABLE:
+            if self.state == self.State.UNAVAILABLE:
                 self.response = None
                 return 0
 
@@ -512,7 +527,7 @@ class Worker:
         self.avg_ipm = avg_ipm_result
         self.response = None
         self.benchmarked = True
-        self.state = State.IDLE
+        self.state = self.State.IDLE
         return avg_ipm_result
 
     def refresh_checkpoints(self):
@@ -545,7 +560,7 @@ class Worker:
             )
 
             if response.status_code == 200:
-                self.state = State.INTERRUPTED
+                self.state = self.State.INTERRUPTED
                 logger.debug(f"successfully interrupted worker {self.uuid}")
         except requests.exceptions.ConnectionError:
             self.mark_unreachable()
@@ -555,8 +570,8 @@ class Worker:
         try:
             response = self.session.get(
                 self.full_url("memory"),
-                verify=self.verify_remotes,
-                timeout=3
+                timeout=3,
+                verify=self.verify_remotes  # this has to be reset here because of connection pooling junk
             )
             if response.status_code == 200:
                 return True
@@ -567,19 +582,22 @@ class Worker:
             return False
 
     def mark_unreachable(self):
-        logger.error(f"Worker '{self.uuid}' at {self} was unreachable, will avoid in the future")
-        self.state = State.UNAVAILABLE
+        if self.state == self.State.DISABLED:
+            logger.debug(f"worker '{self.uuid}' is disabled... refusing to mark as unavailable")
+        else:
+            logger.error(f"worker '{self.uuid}' at {self} was unreachable, will avoid in the future")
+            self.state = self.State.UNAVAILABLE
 
     def available_models(self) -> Union[List[str], None]:
-        if self.state == State.UNAVAILABLE:
+        if self.state == self.State.UNAVAILABLE or self.state == self.State.DISABLED:
             return None
 
         url = self.full_url('sd-models')
         try:
             response = self.session.get(
                 url=url,
-                verify=self.verify_remotes,
-                timeout=5
+                timeout=5,
+                verify=self.verify_remotes
             )
 
             if response.status_code != 200:

@@ -50,16 +50,15 @@ class Script(scripts.Script):
     # add workers to the world
     world.load_config()
     if cmd_opts.distributed_remotes is not None and len(cmd_opts.distributed_remotes) > 0:
-        logger.warning(
-            f""" 
-            --distributed-remotes is deprecated and may be removed in the future
-            gui/external modification of {world.config_path} will be prioritized going forward
-            """
-        )
+        logger.warning(f"--distributed-remotes is deprecated and may be removed in the future\n"
+                       "gui/external modification of {world.config_path} will be prioritized going forward")
 
         for worker in cmd_opts.distributed_remotes:
-            world.add_worker(uuid=worker[0], address=worker[1], port=worker[2])
+            world.add_worker(uuid=worker[0], address=worker[1], port=worker[2], tls=False)
         world.save_config()
+    # do an early check to see which workers are online
+    logger.info("doing initial ping sweep to see which workers are reachable")
+    world.ping_remotes()
 
     def title(self):
         return "Distribute"
@@ -235,6 +234,7 @@ class Script(scripts.Script):
         # strip scripts that aren't yet supported and warn user
         packed_script_args: List[dict] = []  # list of api formatted per-script argument objects
         # { "script_name": { "args": ["value1", "value2", ...] }
+        incompat_list = []
         for script in p.scripts.scripts:
             if script.alwayson is not True:
                 continue
@@ -263,7 +263,15 @@ class Script(scripts.Script):
                 # packed_script_args.append(args_script_pack)
                 # # https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111/issues/12#issuecomment-1480382514
                 if Script.runs_since_init < 1:
-                    logger.warning(f"Distributed doesn't yet support '{title}'")
+                    incompat_list.append(title)
+
+        if Script.runs_since_init < 1 and len(incompat_list) >= 1:
+            m = "Distributed doesn't yet support:"
+            for i in range(0, len(incompat_list)):
+                m += f" {incompat_list[i]}"
+                if i < len(incompat_list) - 1:
+                    m += ","
+            logger.warning(m)
 
         # encapsulating the request object within a txt2imgreq object is deprecated and no longer works
         # see test/basic_features/txt2img_test.py for an example

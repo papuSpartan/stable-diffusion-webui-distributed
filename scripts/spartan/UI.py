@@ -5,7 +5,7 @@ import threading
 from pathlib import Path
 import gradio
 from .shared import logger, log_level
-from .Worker import State, Worker
+from .Worker import Worker
 from modules.shared import state as webui_state
 from typing import List
 from threading import Thread
@@ -55,7 +55,7 @@ class UI:
 
     def status_btn(self):
         worker_status = ''
-        workers = self.world.get_workers()
+        workers = self.world._workers
 
         for worker in workers:
             if worker.master:
@@ -65,7 +65,7 @@ class UI:
 
         # TODO replace this with a single check to a state flag that we should make in the world class
         for worker in workers:
-            if worker.state == State.WORKING:
+            if worker.state == Worker.State.WORKING:
                 return self.world.__str__(), worker_status
 
         return 'No active jobs!', worker_status
@@ -77,19 +77,36 @@ class UI:
         self.world.job_timeout = job_timeout
         logger.debug(f"job timeout is now {job_timeout} seconds")
 
-    def save_worker_btn(self, name, address, port, tls):
+    def save_worker_btn(self, name, address, port, tls, disabled):
         # TODO refactor uuid field, add auth fields
-        self.world.add_worker(uuid=name, address=address, port=port, tls=tls)
+
+        # determine what state to save
+        # if updating a pre-existing worker then grab its current state
+        state = Worker.State.IDLE
+        if disabled:
+            state = Worker.State.DISABLED
+        else:
+            original = self.world[name]
+            if original is not None:
+                state = original.state
+
+        self.world.add_worker(
+            uuid=name,
+            address=address,
+            port=port,
+            tls=tls,
+            state=state
+        )
         self.world.save_config()
 
         # visibly update which workers can be selected
-        labels = [x.uuid for x in self.selectable_remote_workers()]
+        labels = [worker.uuid for worker in self.selectable_remote_workers()]
         return gradio.Dropdown.update(choices=labels)
 
     def selectable_remote_workers(self) -> List[Worker]:
         remote_workers = []
 
-        for worker in self.world.get_workers():
+        for worker in self.world._workers:
             if worker.master:
                 continue
             remote_workers.append(worker)
@@ -122,22 +139,10 @@ class UI:
             gradio.Textbox.update(value=selected_worker.address),
             gradio.Textbox.update(value=selected_worker.port),
             gradio.Checkbox.update(value=selected_worker.tls),
-            gradio.Dropdown.update(choices=avail_models)
+            gradio.Dropdown.update(choices=avail_models),
+            gradio.Checkbox.update(value=True if selected_worker.state == Worker.State.DISABLED else False)
         ]
 
-    def reconnect_remotes(self):
-        for worker in self.world._workers:
-            if worker.master:
-                continue
-
-            logger.debug(f"checking if worker '{worker.uuid}' is now reachable...")
-            reachable = worker.reachable()
-            if worker.state == State.UNAVAILABLE:
-                if reachable:
-                    logger.info(f"worker '{worker.uuid}' is now online, marking as available")
-                    worker.state = State.IDLE
-                else:
-                    logger.info(f"worker '{worker.uuid}' is still unreachable")
 
     def override_worker_model(self, model, worker_label):
         worker = self.world[worker_label]
@@ -191,7 +196,7 @@ class UI:
 
                     reconnect_lost_workers_btn = gradio.Button(value='Attempt reconnection with remotes')
                     reconnect_lost_workers_btn.style(full_width=False)
-                    reconnect_lost_workers_btn.click(self.reconnect_remotes)
+                    reconnect_lost_workers_btn.click(self.world.ping_remotes)
 
                     if log_level == 'DEBUG':
                         clear_queue_btn = gradio.Button(value='Clear local webui queue', variant='stop')
@@ -210,6 +215,9 @@ class UI:
                     worker_tls_cbx = gradio.Checkbox(
                         label='connect using https'
                     )
+                    worker_disabled_cbx = gradio.Checkbox(
+                        label='disabled'
+                    )
 
                     with gradio.Accordion(label='Advanced'):
                         model_override_dropdown = gradio.Dropdown(label='Model override')
@@ -217,14 +225,14 @@ class UI:
 
                     with gradio.Row():
                         save_worker_btn = gradio.Button(value='Add/Update Worker')
-                        save_worker_btn.click(self.save_worker_btn, inputs=[worker_select_dropdown, worker_address_field, worker_port_field, worker_tls_cbx], outputs=[worker_select_dropdown])
+                        save_worker_btn.click(self.save_worker_btn, inputs=[worker_select_dropdown, worker_address_field, worker_port_field, worker_tls_cbx, worker_disabled_cbx], outputs=[worker_select_dropdown])
                         remove_worker_btn = gradio.Button(value='Remove Worker', variant='stop')
                         remove_worker_btn.click(self.remove_worker_btn, inputs=worker_select_dropdown, outputs=[worker_select_dropdown])
 
                     worker_select_dropdown.select(
                         self.populate_worker_config_from_selection,
                         inputs=worker_select_dropdown,
-                        outputs=[worker_address_field, worker_port_field, worker_tls_cbx, model_override_dropdown]
+                        outputs=[worker_address_field, worker_port_field, worker_tls_cbx, model_override_dropdown, worker_disabled_cbx]
                     )
 
                 with gradio.Tab('Settings'):
