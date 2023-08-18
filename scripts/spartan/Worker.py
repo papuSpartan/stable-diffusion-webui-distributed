@@ -91,11 +91,12 @@ class Worker:
                  avg_ipm: float = 1.0, eta_percent_error=None
                  ):
 
-        if eta_percent_error is None:
-            eta_percent_error = []
+        self.eta_percent_error = eta_percent_error
+        if self.eta_percent_error is None:
+            self.eta_percent_error = [0]
+
         self.avg_ipm = avg_ipm
         self.state = state if type(state) is State else State(state)
-        self.eta_percent_error = eta_percent_error if eta_percent_error is not None else []
         self.address = address
         self.port = port
         self.response_time = None
@@ -155,8 +156,8 @@ class Worker:
         # requests session
         self.session = requests.Session()
         self.session.auth = self.auth
-        # wish I could just do this, but it doesn't seem to work https://github.com/psf/requests/issues/2255
-        # self.session.verify = not verify_remotes
+        # sometimes breaks: https://github.com/psf/requests/issues/2255
+        self.session.verify = not verify_remotes
 
     def __str__(self):
         return f"{self.address}:{self.port}"
@@ -291,8 +292,7 @@ class Worker:
             if self.queried is False:
                 self.queried = True
                 memory_response = self.session.get(
-                    self.full_url("memory"),
-                    verify=self.verify_remotes
+                    self.full_url("memory")
                 )
                 memory_response = memory_response.json()
                 try:
@@ -369,8 +369,7 @@ class Worker:
                     try:
                         response = self.session.post(
                             self.full_url("txt2img") if init_images is None else self.full_url("img2img"),
-                            json=payload,
-                            verify=self.verify_remotes
+                            json=payload
                         )
                         response_queue.put(response)
                     except Exception as e:
@@ -508,13 +507,11 @@ class Worker:
         try:
             model_response = self.session.post(
                 self.full_url('refresh-checkpoints'),
-                json={},
-                verify=self.verify_remotes
+                json={}
             )
             lora_response = self.session.post(
                 self.full_url('refresh-loras'),
-                json={},
-                verify=self.verify_remotes
+                json={}
             )
 
             if model_response.status_code != 200:
@@ -529,8 +526,7 @@ class Worker:
         try:
             response = self.session.post(
                 self.full_url('interrupt'),
-                json={},
-                verify=self.verify_remotes
+                json={}
             )
 
             if response.status_code == 200:
@@ -545,7 +541,7 @@ class Worker:
             response = self.session.get(
                 self.full_url("memory"),
                 timeout=3,
-                verify=self.verify_remotes  # this has to be reset here because of connection pooling junk
+                verify=not self.verify_remotes
             )
             if response.status_code == 200:
                 return True
@@ -570,8 +566,7 @@ class Worker:
         try:
             response = self.session.get(
                 url=url,
-                timeout=5,
-                verify=self.verify_remotes
+                timeout=5
             )
 
             if response.status_code != 200:
@@ -596,8 +591,7 @@ class Worker:
 
         response = self.session.post(
             self.full_url("options"),
-            json=payload,
-            verify=self.verify_remotes
+            json=payload
         )
 
         if response.status_code != 200:

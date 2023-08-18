@@ -20,7 +20,8 @@ class Worker_Model(BaseModel):
     port: Optional[int] = Field(default=7860, ge=0, le=65535)
     eta_percent_error: Optional[List[float]] = Field(
         title='ETA Percent Error',
-        description='A list of eta prediction percent errors from the last session'
+        description='A list of eta prediction percent errors from the last session',
+        default=[0]
     )
     tls: Optional[bool] = Field(
         title='Transport Layer Security',

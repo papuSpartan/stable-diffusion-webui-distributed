@@ -18,7 +18,7 @@ from modules.processing import process_images, StableDiffusionProcessingTxt2Img
 import modules.shared as shared
 from .Worker import Worker, State
 from .shared import logger, warmup_samples
-from .models import Config_Model
+from .models import Config_Model, Benchmark_Payload
 from . import shared as sh
 
 
@@ -337,8 +337,10 @@ class World:
 
         # wrap our benchmark payload
         master_bench_payload = StableDiffusionProcessingTxt2Img()
-        for key in sh.benchmark_payload:
-            setattr(master_bench_payload, key, sh.benchmark_payload[key])
+        d = sh.benchmark_payload.dict()
+        for key in d:
+            setattr(master_bench_payload, key, d[key])
+
         # Keeps from trying to save the images when we don't know the path. Also, there's not really any reason to.
         master_bench_payload.do_not_save_samples = True
 
@@ -544,7 +546,7 @@ class World:
 
             self.add_worker(**fields)
 
-        sh.benchmark_payload = config.benchmark_payload
+        sh.benchmark_payload = Benchmark_Payload(**config.benchmark_payload)
 
         logger.debug("config loaded")
 
