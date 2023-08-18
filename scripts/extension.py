@@ -61,7 +61,7 @@ class Script(scripts.Script):
         world.save_config()
     # do an early check to see which workers are online
     logger.info("doing initial ping sweep to see which workers are reachable")
-    world.ping_remotes()
+    world.ping_remotes(indiscriminate=True)
 
     def title(self):
         return "Distribute"

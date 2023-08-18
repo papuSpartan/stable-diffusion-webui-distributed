@@ -561,18 +561,28 @@ class World:
             config_file.write(config.json(indent=3))
             logger.debug(f"config saved")
 
-    def ping_remotes(self):
+    def ping_remotes(self, indiscriminate: bool = False):
+        """
+        Checks to see which workers are reachable over the network and marks those that are not as such
+
+        Args:
+            indiscriminate: if True, also pings workers thought to already be reachable (State.IDLE)
+        """
         for worker in self._workers:
             if worker.master:
                 continue
             if worker.state == State.DISABLED:
                 logger.debug(f"refusing to ping disabled worker '{worker.label}'")
+                continue
 
-            if worker.state == State.UNAVAILABLE:
-                logger.debug(f"checking if worker '{worker.label}' is now reachable...")
+            if worker.state == State.UNAVAILABLE or indiscriminate is True:
+                logger.debug(f"checking if worker '{worker.label}' is reachable...")
                 reachable = worker.reachable()
                 if reachable:
-                    logger.info(f"worker '{worker.label}' is now online, marking as available")
+                    if worker.state == State.IDLE:
+                        continue
+
+                    logger.info(f"worker '{worker.label}' is online, marking as available")
                     worker.state = State.IDLE
                 else:
-                    logger.info(f"worker '{worker.label}' is still unreachable")
+                    logger.info(f"worker '{worker.label}' is unreachable")
