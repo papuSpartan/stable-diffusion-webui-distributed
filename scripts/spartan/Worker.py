@@ -91,10 +91,10 @@ class Worker:
                  avg_ipm: float = 1.0, eta_percent_error=None
                  ):
 
-        self.eta_percent_error = eta_percent_error
-        if self.eta_percent_error is None:
-            self.eta_percent_error = [0]
-
+        if eta_percent_error is None:
+            self.eta_percent_error = []
+        else:
+            self.eta_percent_error = eta_percent_error
         self.avg_ipm = avg_ipm
         self.state = state if type(state) is State else State(state)
         self.address = address
@@ -412,8 +412,6 @@ class Worker:
                         # this should help adjust to the user changing tasks
                         if len(self.eta_percent_error) > 4:
                             self.eta_percent_error.pop(0)
-                        if self.eta_percent_error == 0:  # init
-                            self.eta_percent_error[0] = variance
                         else:  # normal case
                             self.eta_percent_error.append(variance)
                     else:

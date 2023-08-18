@@ -21,7 +21,7 @@ class Worker_Model(BaseModel):
     eta_percent_error: Optional[List[float]] = Field(
         title='ETA Percent Error',
         description='A list of eta prediction percent errors from the last session',
-        default=[0]
+        default=list()
     )
     tls: Optional[bool] = Field(
         title='Transport Layer Security',

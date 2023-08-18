@@ -155,9 +155,6 @@ class World:
 
         Returns:
             Worker: The worker object.
-        
-        Raises:
-            InvalidWorkerResponse: If the worker is not valid.
         """
 
         original = self[kwargs['label']]  # if worker doesn't already exist then just make a new one
