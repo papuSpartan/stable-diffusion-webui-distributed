@@ -503,14 +503,8 @@ class Worker:
 
     def refresh_checkpoints(self):
         try:
-            model_response = self.session.post(
-                self.full_url('refresh-checkpoints'),
-                json={}
-            )
-            lora_response = self.session.post(
-                self.full_url('refresh-loras'),
-                json={}
-            )
+            model_response = self.session.post(self.full_url('refresh-checkpoints'))
+            lora_response = self.session.post(self.full_url('refresh-loras'))
 
             if model_response.status_code != 200:
                 logger.error(f"Failed to refresh models for worker '{self.label}'\nCode <{model_response.status_code}>")
@@ -522,10 +516,7 @@ class Worker:
 
     def interrupt(self):
         try:
-            response = self.session.post(
-                self.full_url('interrupt'),
-                json={}
-            )
+            response = self.session.post(self.full_url('interrupt'))
 
             if response.status_code == 200:
                 self.state = State.INTERRUPTED
