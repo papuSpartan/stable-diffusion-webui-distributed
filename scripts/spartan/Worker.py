@@ -1,6 +1,6 @@
 import io
 import requests
-from typing import List, Tuple, Union, Optional, Any
+from typing import List, Tuple, Union
 import math
 import copy
 import time
@@ -20,7 +20,7 @@ try:
 except ImportError:  # webui 95821f0132f5437ef30b0dbcac7c51e55818c18f and newer
     from modules.initialize_util import gradio_server_name
     server_name = gradio_server_name()
-from pydantic import BaseModel, Field
+from .models import Worker_Model
 
 
 class InvalidWorkerResponse(Exception):
@@ -30,26 +30,12 @@ class InvalidWorkerResponse(Exception):
     pass
 
 
-class Model(BaseModel):
-    avg_ipm: float | None = Field(
-        title='Average Speed',
-        description='the speed of a device measured in ipm(images per minute)',
-        ge=0
-    )
-    master: bool = Field(description="whether or not an instance is the master(local) node", default=False)
-    address: Optional[str] = Field(default='localhost')
-    port: Optional[int] = Field(default=7860, ge=0, le=65535)
-    last_mpe: Optional[float] = Field(
-        title='Last Mean Percent Error',
-        description='The MPE of eta predictions in the last session'
-    )
-    tls: Optional[bool] = Field(
-        title='Transport Layer Security',
-        description='Whether or not to make requests to a worker securely',
-        default=False
-    )
-    state: Optional[Any] = Field(default=1, description="The last known state of this worker. 1 = IDLE, 5 = DISABLED")
-    # auth
+class State(Enum):
+    IDLE = 1
+    WORKING = 2
+    INTERRUPTED = 3
+    UNAVAILABLE = 4
+    DISABLED = 5
 
 
 class Worker:
@@ -74,12 +60,7 @@ class Worker:
             InvalidWorkerResponse: If the worker responds with an invalid or unexpected response.
         """
 
-    class State(Enum):
-        IDLE = 1
-        WORKING = 2
-        INTERRUPTED = 3
-        UNAVAILABLE = 4
-        DISABLED = 5
+
 
     # Percentages representing (roughly) how much faster a given sampler is in comparison to Euler A.
     # We compare to euler a because that is what we currently benchmark each node with.
@@ -106,13 +87,15 @@ class Worker:
 
     def __init__(self, address: Union[str, None] = None, port: int = 7860, label: Union[str, None] = None,
                  verify_remotes: bool = True, master: bool = False, tls: bool = False,
-                 auth: Union[str, None, Tuple, List] = None, state: int = 1,
-                 avg_ipm: float = 1.0, last_mpe: float = None
+                 auth: Union[str, None, Tuple, List] = None, state: State = State.IDLE,
+                 avg_ipm: float = 1.0, eta_percent_error=None
                  ):
 
+        if eta_percent_error is None:
+            eta_percent_error = []
         self.avg_ipm = avg_ipm
-        self.state = self.State(state)
-        self.eta_percent_error = [last_mpe] if last_mpe is not None else []
+        self.state = state if type(state) is State else State(state)
+        self.eta_percent_error = eta_percent_error if eta_percent_error is not None else []
         self.address = address
         self.port = port
         self.response_time = None
@@ -125,6 +108,7 @@ class Worker:
         self.free_vram: int = 0
         self.response = None
         self.queried = False
+        self.benchmarked = False
 
         # master specific setup
         if master is True:
@@ -181,8 +165,8 @@ class Worker:
         return f"'{self.label}'@{self.address}:{self.port}, speed: {self.avg_ipm} ipm, state: {self.state}"
 
     @property
-    def model(self) -> Model:
-        return Model(**self.__dict__)
+    def model(self) -> Worker_Model:
+        return Worker_Model(**self.__dict__)
 
     def eta_mpe(self):
         """
@@ -247,7 +231,7 @@ class Worker:
         # if worker has not yet been benchmarked then
         eta = (num_images / self.avg_ipm) * 60
         # show effect of increased step size
-        real_steps_to_benched = steps / sh.benchmark_payload['steps']
+        real_steps_to_benched = steps / sh.benchmark_payload.steps
         eta = eta * real_steps_to_benched
 
         # show effect of high-res fix
@@ -257,7 +241,7 @@ class Worker:
 
         # show effect of image size
         real_pix_to_benched = (payload['width'] * payload['height'])\
-            / (sh.benchmark_payload['width'] * sh.benchmark_payload['height'])
+            / (sh.benchmark_payload.width * sh.benchmark_payload.height)
         eta = eta * real_pix_to_benched
 
         # show effect of using a sampler other than euler a
@@ -301,7 +285,7 @@ class Worker:
         eta = None
 
         try:
-            self.state = self.State.WORKING
+            self.state = State.WORKING
 
             # query memory available on worker and store for future reference
             if self.queried is False:
@@ -416,7 +400,7 @@ class Worker:
                     raise InvalidWorkerResponse()
 
                 # update list of ETA accuracy if state is valid
-                if self.benchmarked and not self.state == self.State.INTERRUPTED:
+                if self.benchmarked and not self.state == State.INTERRUPTED:
                     self.response_time = time.time() - start
                     variance = ((eta - self.response_time) / self.response_time) * 100
 
@@ -437,7 +421,7 @@ class Worker:
                         logger.warning(f"Variance of {variance:.2f}% exceeds threshold of 500%. Ignoring...\n")
 
             except Exception as e:
-                self.state = self.State.IDLE
+                self.state = State.IDLE
 
                 if payload['batch_size'] == 0:
                     raise InvalidWorkerResponse("Tried to request a null amount of images")
@@ -448,7 +432,7 @@ class Worker:
             self.mark_unreachable()
             return
 
-        self.state = self.State.IDLE
+        self.state = State.IDLE
         return
 
     def benchmark(self) -> float:
@@ -460,7 +444,7 @@ class Worker:
         t: Thread
         samples = 2  # number of times to benchmark the remote / accuracy
 
-        if self.state == self.State.DISABLED or self.state == self.State.UNAVAILABLE:
+        if self.state == State.DISABLED or self.state == State.UNAVAILABLE:
             logger.debug(f"worker '{self.label}' is unavailable or disabled, refusing to benchmark")
             return 0
 
@@ -478,18 +462,18 @@ class Worker:
                 float: Images per minute
             """
 
-            return sh.benchmark_payload['batch_size'] / (seconds / 60)
+            return sh.benchmark_payload.batch_size / (seconds / 60)
 
         results: List[float] = []
         # it used to be lower for the first couple of generations
         # this was due to something torch does at startup according to auto and is now done at sdwui startup
-        self.state = self.State.WORKING
+        self.state = State.WORKING
         for i in range(0, samples + warmup_samples):  # run some extra times so that the remote can "warm up"
-            if self.state == self.State.UNAVAILABLE:
+            if self.state == State.UNAVAILABLE:
                 self.response = None
                 return 0
 
-            t = Thread(target=self.request, args=(sh.benchmark_payload, None, False,),
+            t = Thread(target=self.request, args=(dict(sh.benchmark_payload), None, False,),
                        name=f"{self.label}_benchmark_request")
             try:  # if the worker is unreachable/offline then handle that here
                 t.start()
@@ -517,7 +501,7 @@ class Worker:
         self.avg_ipm = avg_ipm_result
         self.response = None
         self.benchmarked = True
-        self.state = self.State.IDLE
+        self.state = State.IDLE
         return avg_ipm_result
 
     def refresh_checkpoints(self):
@@ -550,7 +534,7 @@ class Worker:
             )
 
             if response.status_code == 200:
-                self.state = self.State.INTERRUPTED
+                self.state = State.INTERRUPTED
                 logger.debug(f"successfully interrupted worker {self.label}")
         except requests.exceptions.ConnectionError:
             self.mark_unreachable()
@@ -572,14 +556,14 @@ class Worker:
             return False
 
     def mark_unreachable(self):
-        if self.state == self.State.DISABLED:
+        if self.state == State.DISABLED:
             logger.debug(f"worker '{self.label}' is disabled... refusing to mark as unavailable")
         else:
             logger.error(f"worker '{self.label}' at {self} was unreachable, will avoid in the future")
-            self.state = self.State.UNAVAILABLE
+            self.state = State.UNAVAILABLE
 
     def available_models(self) -> Union[List[str], None]:
-        if self.state == self.State.UNAVAILABLE or self.state == self.State.DISABLED:
+        if self.state == State.UNAVAILABLE or self.state == State.DISABLED:
             return None
 
         url = self.full_url('sd-models')
@@ -622,3 +606,5 @@ class Worker:
             self.loaded_model = model_name
             if vae is not None:
                 self.loaded_vae = vae
+
+

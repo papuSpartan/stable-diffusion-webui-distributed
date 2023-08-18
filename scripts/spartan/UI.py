@@ -3,7 +3,7 @@ import subprocess
 from pathlib import Path
 import gradio
 from .shared import logger, log_level
-from .Worker import Worker
+from .Worker import Worker, State
 from modules.shared import state as webui_state
 from typing import List
 from threading import Thread
@@ -68,7 +68,7 @@ class UI:
 
         # TODO replace this with a single check to a state flag that we should make in the world class
         for worker in workers:
-            if worker.state == Worker.State.WORKING:
+            if worker.state == State.WORKING:
                 return self.world.__str__(), worker_status
 
         return 'No active jobs!', worker_status
@@ -87,13 +87,13 @@ class UI:
 
         # determine what state to save
         # if updating a pre-existing worker then grab its current state
-        state = Worker.State.IDLE
+        state = State.IDLE
         if disabled:
-            state = Worker.State.DISABLED
+            state = State.DISABLED
         else:
             original = self.world[label]
             if original is not None:
-                state = original.state if original.state != Worker.State.DISABLED else Worker.State.IDLE
+                state = original.state if original.state != State.DISABLED else State.IDLE
 
         self.world.add_worker(
             label=label,
@@ -148,7 +148,7 @@ class UI:
             gradio.Textbox.update(value=selected_worker.port),
             gradio.Checkbox.update(value=selected_worker.tls),
             gradio.Dropdown.update(choices=avail_models),
-            gradio.Checkbox.update(value=True if selected_worker.state == Worker.State.DISABLED else False)
+            gradio.Checkbox.update(value=True if selected_worker.state == State.DISABLED else False)
         ]
 
     def override_worker_model(self, model, worker_label):

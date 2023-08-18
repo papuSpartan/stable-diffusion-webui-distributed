@@ -16,11 +16,10 @@ from os.path import abspath
 from pathlib import Path
 from modules.processing import process_images, StableDiffusionProcessingTxt2Img
 import modules.shared as shared
-from .Worker import Worker, Model
+from .Worker import Worker, State
 from .shared import logger, warmup_samples
+from .models import Config_Model
 from . import shared as sh
-from pydantic import BaseModel, Field
-from .shared import benchmark_payload
 
 
 class NotBenchmarked(Exception):
@@ -59,11 +58,6 @@ class Job:
             prefix = "(complementary) "
 
         return prefix + suffix
-
-
-class Config_Model(BaseModel):
-    workers: List[Dict[str, Model]]
-    benchmark_payload: Dict = Field(default=benchmark_payload, description='the payload used when benchmarking a node')
 
 
 class World:
@@ -357,7 +351,7 @@ class World:
         process_images(master_bench_payload)
         elapsed = time.time() - start
 
-        ipm = sh.benchmark_payload['batch_size'] / (elapsed / 60)
+        ipm = sh.benchmark_payload.batch_size / (elapsed / 60)
 
         logger.debug(f"Master benchmark took {elapsed:.2f}: {ipm:.2f} ipm")
         self.master().benchmarked = True
@@ -371,7 +365,7 @@ class World:
 
         batch_size = self.default_batch_size()
         for worker in self.get_workers():
-            if worker.state != Worker.State.DISABLED and worker.state != Worker.State.UNAVAILABLE:
+            if worker.state != State.DISABLED and worker.state != State.UNAVAILABLE:
                 if worker.avg_ipm is None or worker.avg_ipm <= 0:
                     logger.debug(f"No recorded speed for worker '{worker.label}, benchmarking'")
                     worker.benchmark()
@@ -387,7 +381,7 @@ class World:
                 continue
             if worker.master and self.thin_client_mode:
                 continue
-            if worker.state != Worker.State.UNAVAILABLE and worker.state != Worker.State.DISABLED:
+            if worker.state != State.UNAVAILABLE and worker.state != State.DISABLED:
                 filtered.append(worker)
 
         return filtered
@@ -550,6 +544,8 @@ class World:
 
             self.add_worker(**fields)
 
+        sh.benchmark_payload = config.benchmark_payload
+
         logger.debug("config loaded")
 
     def save_config(self):
@@ -570,14 +566,14 @@ class World:
         for worker in self._workers:
             if worker.master:
                 continue
-            if worker.state == Worker.State.DISABLED:
+            if worker.state == State.DISABLED:
                 logger.debug(f"refusing to ping disabled worker '{worker.label}'")
 
-            if worker.state == Worker.State.UNAVAILABLE:
+            if worker.state == State.UNAVAILABLE:
                 logger.debug(f"checking if worker '{worker.label}' is now reachable...")
                 reachable = worker.reachable()
                 if reachable:
                     logger.info(f"worker '{worker.label}' is now online, marking as available")
-                    worker.state = Worker.State.IDLE
+                    worker.state = State.IDLE
                 else:
                     logger.info(f"worker '{worker.label}' is still unreachable")
