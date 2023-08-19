@@ -18,7 +18,7 @@ from modules.processing import process_images, StableDiffusionProcessingTxt2Img
 import modules.shared as shared
 from .Worker import Worker, State
 from .shared import logger, warmup_samples
-from .models import Config_Model, Benchmark_Payload
+from .pmodels import Config_Model, Benchmark_Payload
 from . import shared as sh
 
 
@@ -79,7 +79,7 @@ class World:
         self.total_batch_size: int = 0
         self._workers: List[Worker] = [self.master_worker]
         self.jobs: List[Job] = []
-        self.job_timeout: int = 6  # seconds
+        self.job_timeout: int = 3  # seconds
         self.initialized: bool = False
         self.verify_remotes = verify_remotes
         self.initial_payload = copy.copy(initial_payload)
@@ -544,6 +544,7 @@ class World:
             self.add_worker(**fields)
 
         sh.benchmark_payload = Benchmark_Payload(**config.benchmark_payload)
+        self.job_timeout = config.job_timeout
 
         logger.debug("config loaded")
 
@@ -554,7 +555,8 @@ class World:
 
         config = Config_Model(
             workers=[{worker.label: worker.model.dict()} for worker in self._workers],
-            benchmark_payload=sh.benchmark_payload
+            benchmark_payload=sh.benchmark_payload,
+            job_timeout=self.job_timeout
         )
 
         with open(self.config_path, 'w+') as config_file:

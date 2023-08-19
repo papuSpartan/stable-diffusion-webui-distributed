@@ -81,6 +81,7 @@ class UI:
         job_timeout = int(job_timeout)
         self.world.job_timeout = job_timeout
         logger.debug(f"job timeout is now {job_timeout} seconds")
+        self.world.save_config()
 
     def save_worker_btn(self, label, address, port, tls, disabled):
         """creates or updates the worker selected in the worker config tab"""

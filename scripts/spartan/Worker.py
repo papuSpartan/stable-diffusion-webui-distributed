@@ -20,7 +20,7 @@ try:
 except ImportError:  # webui 95821f0132f5437ef30b0dbcac7c51e55818c18f and newer
     from modules.initialize_util import gradio_server_name
     server_name = gradio_server_name()
-from .models import Worker_Model
+from .pmodels import Worker_Model
 
 
 class InvalidWorkerResponse(Exception):

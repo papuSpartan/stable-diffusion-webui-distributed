@@ -10,7 +10,7 @@ class Benchmark_Payload(BaseModel):
     batch_size: int = Field(default=1)
 
 class Worker_Model(BaseModel):
-    avg_ipm: float | None = Field(
+    avg_ipm: Optional[float] = Field(
         title='Average Speed',
         description='the speed of a device measured in ipm(images per minute)',
         ge=0
@@ -36,3 +36,4 @@ class Config_Model(BaseModel):
         default=Benchmark_Payload,
         description='the payload used when benchmarking a node'
     )
+    job_timeout: Optional[int] = Field(default=3)
