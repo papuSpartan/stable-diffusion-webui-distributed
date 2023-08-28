@@ -279,9 +279,14 @@ class Script(scripts.Script):
         # encapsulating the request object within a txt2imgreq object is deprecated and no longer works
         # see test/basic_features/txt2img_test.py for an example
         payload = copy.copy(p.__dict__)
+        logger.debug(payload)
         payload['batch_size'] = Script.world.default_batch_size()
         payload['scripts'] = None
-        del payload['script_args']
+        try:
+            del payload['script_args']
+        except KeyError:
+            del payload['script_args_value']
+
 
         payload['alwayson_scripts'] = {}
         for packed in packed_script_args:
@@ -313,7 +318,9 @@ class Script(scripts.Script):
             return
 
         for job in Script.world.jobs:
-            payload_temp = copy.deepcopy(payload)
+            payload_temp = copy.copy(payload)
+            del payload_temp['scripts_value']
+            payload_temp = copy.deepcopy(payload_temp)
 
             if job.worker.master:
                 started_jobs.append(job)

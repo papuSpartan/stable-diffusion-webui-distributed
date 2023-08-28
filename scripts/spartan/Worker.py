@@ -366,6 +366,11 @@ class Worker:
                 response_queue = queue.Queue()
 
                 def preemptible_request(response_queue):
+                    logger.debug(f"sending {payload}")
+                    if payload['sampler_index'] is None:
+                        logger.debug("had to substitute sampler index with name")
+                        payload['sampler_index'] = payload['sampler_name']
+
                     try:
                         response = self.session.post(
                             self.full_url("txt2img") if init_images is None else self.full_url("img2img"),
