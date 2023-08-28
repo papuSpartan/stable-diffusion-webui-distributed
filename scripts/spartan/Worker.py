@@ -366,7 +366,6 @@ class Worker:
                 response_queue = queue.Queue()
 
                 def preemptible_request(response_queue):
-                    logger.debug(f"sending {payload}")
                     if payload['sampler_index'] is None:
                         logger.debug("had to substitute sampler index with name")
                         payload['sampler_index'] = payload['sampler_name']
@@ -397,6 +396,18 @@ class Worker:
 
                 self.response = response.json()
                 if response.status_code != 200:
+                    # try again when remote doesn't support the selected sampler by falling back to Euler a
+                    if response.status_code == 404 and self.response['detail'] == "Sampler not found":
+                        logger.warning(f"falling back to Euler A sampler for worker {self.label}\n"
+                                       f"this may mean you should update this worker")
+                        payload['sampler_index'] = 'Euler a'
+                        payload['sampler_name'] = 'Euler a'
+
+                        second_attempt = Thread(target=self.request, args=(payload, option_payload, sync_options,))
+                        second_attempt.start()
+                        second_attempt.join()
+                        return
+
                     logger.error(
                         f"'{self.label}' response: Code <{response.status_code}> "
                         f"{str(response.content, 'utf-8')}")

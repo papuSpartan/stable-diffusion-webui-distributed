@@ -279,7 +279,6 @@ class Script(scripts.Script):
         # encapsulating the request object within a txt2imgreq object is deprecated and no longer works
         # see test/basic_features/txt2img_test.py for an example
         payload = copy.copy(p.__dict__)
-        logger.debug(payload)
         payload['batch_size'] = Script.world.default_batch_size()
         payload['scripts'] = None
         try:
