@@ -516,6 +516,9 @@ class World:
 
                     logger.info(f"translated legacy config")
                     return config
+            else:
+                open(self.config_path, 'w')
+                logger.info(f"Generated new config file at '{self.config_path}'")
 
         with open(self.config_path, 'r') as config:
             try:
@@ -529,6 +532,10 @@ class World:
         This function should be called after worker command arguments are parsed.
         """
         config_raw = self.config()
+        if config_raw is None:
+            logger.debug("cannot parse null config (present but empty config file?)")
+            return
+
         config = Config_Model(**config_raw)
 
         # saves config schema to <extension>/distributed-config.schema.json
