@@ -14,19 +14,22 @@ from typing import List
 import urllib3
 import copy
 from modules.images import save_image
-from modules.shared import cmd_opts
+from modules.shared import opts, cmd_opts
+from modules.shared import state as webui_state
 import time
 from scripts.spartan.World import World, WorldAlreadyInitialized
 from scripts.spartan.UI import UI
-from modules.shared import opts
 from scripts.spartan.shared import logger
 from scripts.spartan.control_net import pack_control_net
 from modules.processing import fix_seed, Processed
+import signal
+import sys
+
+old_sigint_handler = signal.getsignal(signal.SIGINT)
+old_sigterm_handler = signal.getsignal(signal.SIGTERM)
 
 
-# TODO implement SSDP advertisement of some sort in sdwui api to allow extension to automatically discover workers?
-# TODO see if the current api has some sort of UUID generation functionality.
-
+# TODO implement advertisement of some sort in sdwui api to allow extension to automatically discover workers?
 # noinspection PyMissingOrEmptyDocstring
 class Script(scripts.Script):
     worker_threads: List[Thread] = []
@@ -39,6 +42,7 @@ class Script(scripts.Script):
     first_run = True
     master_start = None
     runs_since_init = 0
+    name = "distributed"
 
     if verify_remotes is False:
         logger.warning(f"You have chosen to forego the verification of worker TLS certificates")
@@ -47,8 +51,17 @@ class Script(scripts.Script):
     # build world
     world = World(initial_payload=None, verify_remotes=verify_remotes)
     # add workers to the world
-    for worker in cmd_opts.distributed_remotes:
-        world.add_worker(uuid=worker[0], address=worker[1], port=worker[2])
+    world.load_config()
+    if cmd_opts.distributed_remotes is not None and len(cmd_opts.distributed_remotes) > 0:
+        logger.warning(f"--distributed-remotes is deprecated and may be removed in the future\n"
+                       "gui/external modification of {world.config_path} will be prioritized going forward")
+
+        for worker in cmd_opts.distributed_remotes:
+            world.add_worker(uuid=worker[0], address=worker[1], port=worker[2], tls=False)
+        world.save_config()
+    # do an early check to see which workers are online
+    logger.info("doing initial ping sweep to see which workers are reachable")
+    world.ping_remotes(indiscriminate=True)
 
     def title(self):
         return "Distribute"
@@ -59,21 +72,24 @@ class Script(scripts.Script):
 
     def ui(self, is_img2img):
         extension_ui = UI(script=Script, world=Script.world)
-        extension_ui.create_root()
+        root, api_exposed = extension_ui.create_ui()
+
+        # return some components that should be exposed to the api
+        return api_exposed
 
     @staticmethod
     def add_to_gallery(processed, p):
         """adds generated images to the image gallery after waiting for all workers to finish"""
+        webui_state.textinfo = "Distributed - injecting images"
 
-        def processed_inject_image(image, info_index, iteration: int, save_path_override=None, grid=False, response=None):
-            image_params: json = response["parameters"]
+        def processed_inject_image(image, info_index, save_path_override=None, grid=False, response=None):
+            image_params: json = response['parameters']
             image_info_post: json = json.loads(response["info"])  # image info known after processing
             num_response_images = image_params["batch_size"] * image_params["n_iter"]
 
             seed = None
             subseed = None
             negative_prompt = None
-
 
             try:
                 if num_response_images > 1:
@@ -84,10 +100,10 @@ class Script(scripts.Script):
                     seed = image_info_post['seed']
                     subseed = image_info_post['subseed']
                     negative_prompt = image_info_post['negative_prompt']
-            except Exception:
+            except IndexError:
                 # like with controlnet masks, there isn't always full post-gen info, so we use the first images'
-                logger.debug(f"Image at index {i} for '{worker.uuid}' was missing some post-generation data")
-                processed_inject_image(image=image, info_index=0, iteration=iteration)
+                logger.debug(f"Image at index {i} for '{job.worker.label}' was missing some post-generation data")
+                processed_inject_image(image=image, info_index=0, response=response)
                 return
 
             processed.all_seeds.append(seed)
@@ -105,20 +121,18 @@ class Script(scripts.Script):
             if p.n_iter > 1:  # if splitting by batch count
                 num_remote_images *= p.n_iter - 1
 
-            logger.debug(f"iteration {iteration}/{p.n_iter}, image {true_image_pos + 1}/{Script.world.total_batch_size * p.n_iter}, info-index: {info_index}")
+            logger.debug(f"image {true_image_pos + 1}/{Script.world.total_batch_size * p.n_iter}, "
+                         f"info-index: {info_index}")
 
             if Script.world.thin_client_mode:
                 p.all_negative_prompts = processed.all_negative_prompts
 
-            info_text = processing.create_infotext(
-                p=p,
-                all_prompts=processed.all_prompts,
-                all_seeds=processed.all_seeds,
-                all_subseeds=processed.all_subseeds,
-                # comments=[""], # unimplemented upstream :(
-                position_in_batch=true_image_pos if not grid else 0,
-                iteration=0
-            )
+            try:
+                info_text = image_info_post['infotexts'][i]
+            except IndexError:
+                if not grid:
+                    logger.warning(f"image {true_image_pos + 1} was missing info-text")
+                info_text = processed.infotexts[0]
             processed.infotexts.append(info_text)
 
             # automatically save received image to local disk if desired
@@ -146,7 +160,6 @@ class Script(scripts.Script):
 
         # some worker which we know has a good response that we can use for generating the grid
         donor_worker = None
-        spoofed_iteration = p.n_iter
         for job in Script.world.jobs:
             if job.batch_size < 1 or job.worker.master:
                 continue
@@ -154,37 +167,29 @@ class Script(scripts.Script):
             try:
                 images: json = job.worker.response["images"]
                 # if we for some reason get more than we asked for
-                if job.batch_size < len(images):
-                    logger.debug(f"Requested {job.batch_size} images from '{job.worker.uuid}', got {len(images)}")
+                if (job.batch_size * p.n_iter) < len(images):
+                    logger.debug(f"Requested {job.batch_size} image(s) from '{job.worker.label}', got {len(images)}")
 
                 if donor_worker is None:
                     donor_worker = job.worker
             except KeyError:
                 if job.batch_size > 0:
-                    logger.warning(f"Worker '{job.worker.uuid}' had no images")
+                    logger.warning(f"Worker '{job.worker.label}' had no images")
                 continue
             except TypeError as e:
                 if job.worker.response is None:
-                    logger.error(f"worker '{job.worker.uuid}' had no response")
+                    logger.error(f"worker '{job.worker.label}' had no response")
                 else:
                     logger.exception(e)
                 continue
 
-            injected_to_iteration = 0
-            images_per_iteration = Script.world.get_current_output_size()
             # visibly add work from workers to the image gallery
             for i in range(0, len(images)):
                 image_bytes = base64.b64decode(images[i])
                 image = Image.open(io.BytesIO(image_bytes))
 
                 # inject image
-                processed_inject_image(image=image, info_index=i, iteration=spoofed_iteration, response=job.worker.response)
-
-                if injected_to_iteration >= images_per_iteration - 1:
-                    spoofed_iteration += 1
-                    injected_to_iteration = 0
-                else:
-                    injected_to_iteration += 1
+                processed_inject_image(image=image, info_index=i, response=job.worker.response)
 
         if donor_worker is None:
             logger.critical("couldn't collect any responses, distributed will do nothing")
@@ -197,7 +202,6 @@ class Script(scripts.Script):
                 image=grid,
                 info_index=0,
                 save_path_override=p.outpath_grids,
-                iteration=spoofed_iteration,
                 grid=True,
                 response=donor_worker.response
             )
@@ -228,14 +232,12 @@ class Script(scripts.Script):
     # runs every time the generate button is hit
     def run(self, p, *args):
         current_thread().name = "distributed_main"
-
-        if cmd_opts.distributed_remotes is None:
-            raise RuntimeError("Distributed - No remotes passed. (Try using `--distributed-remotes`?)")
-
         Script.initialize(initial_payload=p)
 
         # strip scripts that aren't yet supported and warn user
         packed_script_args: List[dict] = []  # list of api formatted per-script argument objects
+        # { "script_name": { "args": ["value1", "value2", ...] }
+        incompat_list = []
         for script in p.scripts.scripts:
             if script.alwayson is not True:
                 continue
@@ -256,16 +258,34 @@ class Script(scripts.Script):
 
                 continue
             else:
+                # other scripts to pack
+                # args_script_pack = {}
+                # args_script_pack[title] = {"args": []}
+                # for arg in p.script_args[script.args_from:script.args_to]:
+                #     args_script_pack[title]["args"].append(arg)
+                # packed_script_args.append(args_script_pack)
                 # https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111/issues/12#issuecomment-1480382514
                 if Script.runs_since_init < 1:
-                    logger.warning(f"Distributed doesn't yet support '{title}'")
+                    incompat_list.append(title)
+
+        if Script.runs_since_init < 1 and len(incompat_list) >= 1:
+            m = "Distributed doesn't yet support:"
+            for i in range(0, len(incompat_list)):
+                m += f" {incompat_list[i]}"
+                if i < len(incompat_list) - 1:
+                    m += ","
+            logger.warning(m)
 
         # encapsulating the request object within a txt2imgreq object is deprecated and no longer works
         # see test/basic_features/txt2img_test.py for an example
         payload = copy.copy(p.__dict__)
         payload['batch_size'] = Script.world.default_batch_size()
         payload['scripts'] = None
-        del payload['script_args']
+        try:
+            del payload['script_args']
+        except KeyError:
+            del payload['script_args_value']
+
 
         payload['alwayson_scripts'] = {}
         for packed in packed_script_args:
@@ -279,7 +299,7 @@ class Script(scripts.Script):
         # TODO api for some reason returns 200 even if something failed to be set.
         #  for now we may have to make redundant GET requests to check if actually successful...
         #  https://github.com/AUTOMATIC1111/stable-diffusion-webui/issues/8146
-        name = re.sub(r'\s?\[[^\]]*\]$', '', opts.data["sd_model_checkpoint"])
+        name = re.sub(r'\s?\[[^]]*]$', '', opts.data["sd_model_checkpoint"])
         vae = opts.data["sd_vae"]
         option_payload = {
             "sd_model_checkpoint": name,
@@ -297,7 +317,9 @@ class Script(scripts.Script):
             return
 
         for job in Script.world.jobs:
-            payload_temp = copy.deepcopy(payload)
+            payload_temp = copy.copy(payload)
+            del payload_temp['scripts_value']
+            payload_temp = copy.deepcopy(payload_temp)
 
             if job.worker.master:
                 started_jobs.append(job)
@@ -311,14 +333,17 @@ class Script(scripts.Script):
             payload_temp['batch_size'] = job.batch_size
             payload_temp['subseed'] += prior_images
             payload_temp['seed'] += prior_images if payload_temp['subseed_strength'] == 0 else 0
-            logger.debug(f"'{job.worker.uuid}' job's given starting seed is {payload_temp['seed']} with {prior_images} coming before it")
+            logger.debug(
+                f"'{job.worker.label}' job's given starting seed is "
+                f"{payload_temp['seed']} with {prior_images} coming before it")
 
             if job.worker.loaded_model != name or job.worker.loaded_vae != vae:
                 sync = True
                 job.worker.loaded_model = name
                 job.worker.loaded_vae = vae
 
-            t = Thread(target=job.worker.request, args=(payload_temp, option_payload, sync, ), name=f"{job.worker.uuid}_request")
+            t = Thread(target=job.worker.request, args=(payload_temp, option_payload, sync,),
+                       name=f"{job.worker.label}_request")
 
             t.start()
             Script.worker_threads.append(t)
@@ -341,8 +366,26 @@ class Script(scripts.Script):
             processed.infotexts = []
             processed.prompt = None
         else:
-            processed = processing.process_images(p, *args)
+            processed = processing.process_images(p)
 
         Script.add_to_gallery(processed, p)
         Script.runs_since_init += 1
         return processed
+
+    @staticmethod
+    def signal_handler(sig, frame):
+        logger.debug("handling interrupt signal")
+        # do cleanup
+        Script.world.save_config()
+
+        if sig == signal.SIGINT:
+            if callable(old_sigint_handler):
+                old_sigint_handler(sig, frame)
+        else:
+            if callable(old_sigterm_handler):
+                old_sigterm_handler(sig, frame)
+            else:
+                sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)

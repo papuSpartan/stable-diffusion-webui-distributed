@@ -9,15 +9,17 @@ import copy
 import json
 import os
 import time
-from typing import List
+from typing import List, Dict, Union
 from threading import Thread
 from inspect import getsourcefile
 from os.path import abspath
 from pathlib import Path
 from modules.processing import process_images, StableDiffusionProcessingTxt2Img
 import modules.shared as shared
-from scripts.spartan.Worker import Worker, State
-from scripts.spartan.shared import logger, warmup_samples, benchmark_payload
+from .Worker import Worker, State
+from .shared import logger, warmup_samples
+from .pmodels import Config_Model, Benchmark_Payload
+from . import shared as sh
 
 
 class NotBenchmarked(Exception):
@@ -51,7 +53,7 @@ class Job:
 
     def __str__(self):
         prefix = ''
-        suffix = f"Job: {self.batch_size} images. Owned by '{self.worker.uuid}'. Rate: {self.worker.avg_ipm}ipm"
+        suffix = f"Job: {self.batch_size} images. Owned by '{self.worker.label}'. Rate: {self.worker.avg_ipm}ipm"
         if self.complementary:
             prefix = "(complementary) "
 
@@ -68,19 +70,28 @@ class World:
     """
 
     # I'd rather keep the sdwui root directory clean.
-    this_extension_path = Path(abspath(getsourcefile(lambda: 0))).parent.parent.parent
-    worker_info_path = this_extension_path.joinpath('workers.json')
+    extension_path = Path(abspath(getsourcefile(lambda: 0))).parent.parent.parent
+    config_path = shared.cmd_opts.distributed_config
+    old_config_path = worker_info_path = extension_path.joinpath('workers.json')
 
     def __init__(self, initial_payload, verify_remotes: bool = True):
         self.master_worker = Worker(master=True)
         self.total_batch_size: int = 0
-        self.__workers: List[Worker] = [self.master_worker]
+        self._workers: List[Worker] = [self.master_worker]
         self.jobs: List[Job] = []
-        self.job_timeout: int = 6  # seconds
+        self.job_timeout: int = 3  # seconds
         self.initialized: bool = False
         self.verify_remotes = verify_remotes
         self.initial_payload = copy.copy(initial_payload)
         self.thin_client_mode = False
+
+    def __getitem__(self, label: str) -> Worker:
+        for worker in self._workers:
+            if worker.label == label:
+                return worker
+
+    def __repr__(self):
+        return f"{len(self._workers)} workers"
 
     def update_world(self, total_batch_size):
         """
@@ -136,18 +147,28 @@ class World:
             if job.worker.master:
                 return job
 
-    def add_worker(self, uuid: str, address: str, port: int):
+        raise Exception("Master job not found")
+
+    def add_worker(self, **kwargs):
         """
         Registers a worker with the world.
 
-        Args:
-            uuid (str): The name or unique identifier.
-            address (str): The ip or FQDN.
-            port (int): The port number.
+        Returns:
+            Worker: The worker object.
         """
 
-        worker = Worker(uuid=uuid, address=address, port=port, verify_remotes=self.verify_remotes)
-        self.__workers.append(worker)
+        original = self[kwargs['label']]  # if worker doesn't already exist then just make a new one
+        if original is None:
+            new = Worker(**kwargs)
+            self._workers.append(Worker(**kwargs))
+            return new
+        else:
+            for key in kwargs:
+                attribute = getattr(original, key, None)
+                if attribute is not None:
+                    setattr(original, key, kwargs[key])
+
+            return original
 
     def interrupt_remotes(self):
 
@@ -170,10 +191,7 @@ class World:
         """
         Attempts to benchmark all workers a part of the world.
         """
-        global benchmark_payload
 
-        workers_info: dict = {}
-        saved: bool = os.path.exists(self.worker_info_path)
         unbenched_workers = []
         benchmark_threads = []
 
@@ -183,60 +201,35 @@ class World:
             worker.benchmarked = True
 
         if rebenchmark:
-            saved = False
-            workers = self.get_workers()
-
-            for worker in workers:
+            for worker in self._workers:
                 worker.benchmarked = False
-            unbenched_workers = workers
-
-        if saved:
-            with open(self.worker_info_path, 'r') as worker_info_file:
-                try:
-                    workers_info = json.load(worker_info_file)
-                except json.JSONDecodeError:
-                    logger.error(f"workers.json is not valid JSON, regenerating")
-                    rebenchmark = True
-                    unbenched_workers = self.get_workers()
-
-        # load stats for any workers that have already been benched
-        if saved and not rebenchmark:
-            logger.debug(f"loaded saved configuration: \n{workers_info}")
-
-            for worker in self.get_workers():
-                try:
-                    worker.avg_ipm = workers_info[worker.uuid]['avg_ipm']
-                    worker.benchmarked = True
-                except KeyError:
-                    logger.debug(f"worker '{worker.uuid}' not found in workers.json")
-                    unbenched_workers.append(worker)
-            return
+            unbenched_workers = self._workers
         else:
-            unbenched_workers = self.get_workers()
+            self.load_config()
+
+            for worker in self._workers:
+                if worker.avg_ipm is None or worker.avg_ipm <= 0:
+                    logger.debug(f"recorded speed for worker '{worker.label}' is invalid")
+                    unbenched_workers.append(worker)
+                else:
+                    worker.benchmarked = True
 
         # benchmark those that haven't been
         for worker in unbenched_workers:
-            t = Thread(target=benchmark_wrapped, args=(worker, ), name=f"{worker.uuid}_benchmark")
+            t = Thread(target=benchmark_wrapped, args=(worker, ), name=f"{worker.label}_benchmark")
             benchmark_threads.append(t)
             t.start()
-            logger.info(f"benchmarking worker '{worker.uuid}'")
+            logger.info(f"benchmarking worker '{worker.label}'")
 
         # wait for all benchmarks to finish and update stats on newly benchmarked workers
         if len(benchmark_threads) > 0:
-            with open(self.worker_info_path, 'w') as worker_info_file:
-                for t in benchmark_threads:
-                    t.join()
-                logger.info("Benchmarking finished")
+            for t in benchmark_threads:
+                t.join()
+            logger.info("benchmarking finished")
 
-                for worker in unbenched_workers:
-                    workers_info.update(worker.info())
-                workers_info.update({'benchmark_payload': benchmark_payload})
-
-                # save benchmark results to workers.json
-                json.dump(workers_info, worker_info_file, indent=3)
-
-        logger.info(self.speed_summary())
-
+            # save benchmark results to workers.json
+            self.save_config()
+            logger.info(self.speed_summary())
 
     def get_current_output_size(self) -> int:
         """
@@ -254,7 +247,7 @@ class World:
         """
         Returns string listing workers by their ipm in descending order.
         """
-        workers_copy = copy.deepcopy(self.__workers)
+        workers_copy = copy.deepcopy(self._workers)
         workers_copy.sort(key=lambda w: w.avg_ipm, reverse=True)
 
         total_ipm = 0
@@ -264,7 +257,7 @@ class World:
         i = 1
         output = "World composition:\n"
         for worker in workers_copy:
-            output += f"{i}. '{worker.uuid}'({worker}) - {worker.avg_ipm:.2f} ipm\n"
+            output += f"{i}. '{worker.label}'({worker}) - {worker.avg_ipm:.2f} ipm\n"
             i += 1
         output += f"total: ~{total_ipm:.2f} ipm"
 
@@ -341,8 +334,10 @@ class World:
 
         # wrap our benchmark payload
         master_bench_payload = StableDiffusionProcessingTxt2Img()
-        for key in benchmark_payload:
-            setattr(master_bench_payload, key, benchmark_payload[key])
+        d = sh.benchmark_payload.dict()
+        for key in d:
+            setattr(master_bench_payload, key, d[key])
+
         # Keeps from trying to save the images when we don't know the path. Also, there's not really any reason to.
         master_bench_payload.do_not_save_samples = True
 
@@ -355,7 +350,7 @@ class World:
         process_images(master_bench_payload)
         elapsed = time.time() - start
 
-        ipm = benchmark_payload['batch_size'] / (elapsed / 60)
+        ipm = sh.benchmark_payload.batch_size / (elapsed / 60)
 
         logger.debug(f"Master benchmark took {elapsed:.2f}: {ipm:.2f} ipm")
         self.master().benchmarked = True
@@ -369,18 +364,23 @@ class World:
 
         batch_size = self.default_batch_size()
         for worker in self.get_workers():
-            self.jobs.append(Job(worker=worker, batch_size=batch_size))
+            if worker.state != State.DISABLED and worker.state != State.UNAVAILABLE:
+                if worker.avg_ipm is None or worker.avg_ipm <= 0:
+                    logger.debug(f"No recorded speed for worker '{worker.label}, benchmarking'")
+                    worker.benchmark()
+
+                self.jobs.append(Job(worker=worker, batch_size=batch_size))
 
     def get_workers(self):
-        filtered = []
-        for worker in self.__workers:
+        filtered: List[Worker] = []
+        for worker in self._workers:
             if worker.avg_ipm is not None and worker.avg_ipm <= 0:
-                logger.warning(f"config reports invalid speed (0 ipm) for worker '{worker.uuid}', setting default of 1 ipm.\nplease re-benchmark")
+                logger.warning(f"config reports invalid speed (0 ipm) for worker '{worker.label}', setting default of 1 ipm.\nplease re-benchmark")
                 worker.avg_ipm = 1
                 continue
             if worker.master and self.thin_client_mode:
                 continue
-            if worker.state != State.UNAVAILABLE:
+            if worker.state != State.UNAVAILABLE and worker.state != State.DISABLED:
                 filtered.append(worker)
 
         return filtered
@@ -406,7 +406,7 @@ class World:
                 images_checked += payload['batch_size']
                 continue
 
-            logger.debug(f"worker '{job.worker.uuid}' would stall the image gallery by ~{lag:.2f}s\n")
+            logger.debug(f"worker '{job.worker.label}' would stall the image gallery by ~{lag:.2f}s\n")
             job.complementary = True
             if deferred_images + images_checked + payload['batch_size'] > self.total_batch_size:
                 logger.debug(f"would go over actual requested size")
@@ -456,7 +456,7 @@ class World:
 
             slowest_active_worker = self.slowest_realtime_job().worker
             slack_time = slowest_active_worker.batch_eta(payload=payload)
-            logger.debug(f"There's {slack_time:.2f}s of slack time available for worker '{job.worker.uuid}'")
+            logger.debug(f"There's {slack_time:.2f}s of slack time available for worker '{job.worker.label}'")
 
             # in the case that this worker is now taking on what others workers would have been (if they were real-time)
             # this means that there will be more slack time for complementary nodes
@@ -475,7 +475,7 @@ class World:
         iterations = payload['n_iter']
         distro_summary += f"{self.total_batch_size} * {iterations} iteration(s): {self.total_batch_size * iterations} images total\n"
         for job in self.jobs:
-            distro_summary += f"'{job.worker.uuid}' - {job.batch_size * iterations} images\n"
+            distro_summary += f"'{job.worker.label}' - {job.batch_size * iterations} image(s) @ {job.worker.avg_ipm:.2f} ipm\n"
         logger.info(distro_summary)
 
         # delete any jobs that have no work
@@ -484,3 +484,107 @@ class World:
             if self.jobs[last].batch_size < 1:
                 del self.jobs[last]
             last -= 1
+
+    def config(self) -> dict:
+        """
+         {
+             "workers": [
+                 {
+                     "worker1": {
+                         "address": "<http://www.example.com>"
+                     }
+                 }, ...
+        }
+        """
+        if not os.path.exists(self.config_path):
+            logger.error(f"Config was not found at '{self.config_path}'")
+            if os.path.exists(self.old_config_path):
+
+                with open(self.old_config_path) as config_file:
+                    old_config = json.load(config_file)
+                    config = {"workers": [], "benchmark_payload": old_config.get("benchmark_payload", None)}
+
+                    try:
+                        del old_config["benchmark_payload"]
+                    except KeyError:
+                        pass
+
+                    for worker_label in old_config:
+                        fields = old_config[worker_label]
+                        fields["address"] = "localhost"  # this should be overwritten by add_worker() getting the address from --distributed-remotes
+                        config["workers"].append({worker_label: fields})
+
+                    logger.info(f"translated legacy config")
+                    return config
+
+        with open(self.config_path, 'r') as config:
+            try:
+                return json.load(config)
+            except json.decoder.JSONDecodeError:
+                logger.error(f"config is corrupt or invalid JSON, unable to load")
+
+    def load_config(self):
+        """
+        Loads the config file and adds workers to the world.
+        This function should be called after worker command arguments are parsed.
+        """
+        config_raw = self.config()
+        config = Config_Model(**config_raw)
+
+        # saves config schema to <extension>/distributed-config.schema.json
+        # print(models.Config.schema_json())
+        # with open(self.extension_path.joinpath("distributed-config.schema.json"), "w") as schema_file:
+        #     json.dump(json.loads(models.Config.schema_json()), schema_file, indent=3)
+
+        for w in config.workers:
+            label = next(iter(w.keys()))
+            fields = w[label].__dict__
+            fields['label'] = label
+
+            self.add_worker(**fields)
+
+        sh.benchmark_payload = Benchmark_Payload(**config.benchmark_payload)
+        self.job_timeout = config.job_timeout
+
+        logger.debug("config loaded")
+
+    def save_config(self):
+        """
+        Saves the config file.
+        """
+
+        config = Config_Model(
+            workers=[{worker.label: worker.model.dict()} for worker in self._workers],
+            benchmark_payload=sh.benchmark_payload,
+            job_timeout=self.job_timeout
+        )
+
+        with open(self.config_path, 'w+') as config_file:
+            config_file.write(config.json(indent=3))
+            logger.debug(f"config saved")
+
+    def ping_remotes(self, indiscriminate: bool = False):
+        """
+        Checks to see which workers are reachable over the network and marks those that are not as such
+
+        Args:
+            indiscriminate: if True, also pings workers thought to already be reachable (State.IDLE)
+        """
+        for worker in self._workers:
+            if worker.master:
+                continue
+            if worker.state == State.DISABLED:
+                logger.debug(f"refusing to ping disabled worker '{worker.label}'")
+                continue
+
+            if worker.state == State.UNAVAILABLE or indiscriminate is True:
+                logger.debug(f"checking if worker '{worker.label}' is reachable...")
+                reachable = worker.reachable()
+                if reachable:
+                    if worker.state == State.IDLE:
+                        continue
+
+                    logger.info(f"worker '{worker.label}' is online, marking as available")
+                    worker.state = State.IDLE
+                else:
+                    logger.info(f"worker '{worker.label}' is unreachable")
