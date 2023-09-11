@@ -54,7 +54,7 @@ class Script(scripts.Script):
     world.load_config()
     if cmd_opts.distributed_remotes is not None and len(cmd_opts.distributed_remotes) > 0:
         logger.warning(f"--distributed-remotes is deprecated and may be removed in the future\n"
-                       "gui/external modification of {world.config_path} will be prioritized going forward")
+                       f"gui/external modification of {world.config_path} will be prioritized going forward")
 
         for worker in cmd_opts.distributed_remotes:
             world.add_worker(uuid=worker[0], address=worker[1], port=worker[2], tls=False)
