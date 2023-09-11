@@ -366,9 +366,13 @@ class Worker:
                 response_queue = queue.Queue()
 
                 def preemptible_request(response_queue):
-                    if payload['sampler_index'] is None:
-                        logger.debug("had to substitute sampler index with name")
-                        payload['sampler_index'] = payload['sampler_name']
+                    # TODO shouldn't be this way
+                    sampler_index = payload.get('sampler_index', None)
+                    sampler_name = payload.get('sampler_name', None)
+                    if sampler_index is None:
+                        if sampler_name is not None:
+                            logger.debug("had to substitute sampler index with name")
+                            payload['sampler_index'] = sampler_name
 
                     try:
                         response = self.session.post(
