@@ -11,13 +11,10 @@ import os
 import time
 from typing import List, Dict, Union
 from threading import Thread
-from inspect import getsourcefile
-from os.path import abspath
-from pathlib import Path
 from modules.processing import process_images, StableDiffusionProcessingTxt2Img
 import modules.shared as shared
 from .Worker import Worker, State
-from .shared import logger, warmup_samples
+from .shared import logger, warmup_samples, extension_path
 from .pmodels import Config_Model, Benchmark_Payload
 from . import shared as sh
 
@@ -70,7 +67,6 @@ class World:
     """
 
     # I'd rather keep the sdwui root directory clean.
-    extension_path = Path(abspath(getsourcefile(lambda: 0))).parent.parent.parent
     config_path = shared.cmd_opts.distributed_config
     old_config_path = worker_info_path = extension_path.joinpath('workers.json')
 
