@@ -529,13 +529,7 @@ class World:
         config_raw = self.config()
         if config_raw is None:
             logger.debug("cannot parse null config (present but empty config file?)")
-            why ={"prompt": "A herd of cows grazing at the bottom of a sunny valley",
-                "negative_prompt": "",
-                "steps": 20,
-                "width": 512,
-                "height": 512,
-                "batch_size": 1}
-            sh.benchmark_payload = Benchmark_Payload(**why)
+            sh.benchmark_payload = Benchmark_Payload()
             return
 
         config = Config_Model(**config_raw)

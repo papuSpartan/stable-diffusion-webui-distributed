@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 class Benchmark_Payload(BaseModel):
     prompt: str = Field(default="A herd of cows grazing at the bottom of a sunny valley")
-    negative_prompt: str
+    negative_prompt: str = Field(default="")
     steps: int = Field(default=20)
     width: int = Field(default=512)
     height: int = Field(default=512)
