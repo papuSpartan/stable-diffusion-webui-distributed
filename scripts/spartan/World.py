@@ -160,8 +160,7 @@ class World:
             return new
         else:
             for key in kwargs:
-                attribute = getattr(original, key, None)
-                if attribute is not None:
+                if hasattr(original, key):
                     setattr(original, key, kwargs[key])
 
             return original

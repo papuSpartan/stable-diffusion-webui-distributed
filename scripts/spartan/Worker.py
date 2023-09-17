@@ -86,9 +86,8 @@ class Worker:
     }
 
     def __init__(self, address: Union[str, None] = None, port: int = 7860, label: Union[str, None] = None,
-                 verify_remotes: bool = True, master: bool = False, tls: bool = False,
-                 auth: Union[str, None, Tuple, List] = None, state: State = State.IDLE,
-                 avg_ipm: float = 1.0, eta_percent_error=None
+                 verify_remotes: bool = True, master: bool = False, tls: bool = False, state: State = State.IDLE,
+                 avg_ipm: float = 1.0, eta_percent_error=None, user: str = None, password: str = None
                  ):
 
         if eta_percent_error is None:
@@ -140,22 +139,12 @@ class Worker:
             raise InvalidWorkerResponse("Worker address cannot be None")
 
         # auth
-        self.user = None
-        self.password = None
-        if auth is not None:
-            if isinstance(auth, str):
-                self.user = auth.split(':')[0]
-                self.password = auth.split(':')[1]
-            elif isinstance(auth, (tuple, list)):
-                self.user = auth[0]
-                self.password = auth[1]
-            else:
-                raise ValueError(f"Invalid auth value: {auth}")
-        self.auth: Union[Tuple[str, str], None] = (self.user, self.password) if self.user is not None else None
+        self.user = user
+        self.password = password
 
         # requests session
         self.session = requests.Session()
-        self.session.auth = self.auth
+        self.session.auth = (self.user, self.password)
         # sometimes breaks: https://github.com/psf/requests/issues/2255
         self.session.verify = not verify_remotes
 
@@ -609,5 +598,4 @@ class Worker:
             self.loaded_model = model_name
             if vae is not None:
                 self.loaded_vae = vae
-
 

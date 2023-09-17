@@ -164,6 +164,19 @@ class UI:
             # set model on remote early
             Thread(target=worker.load_options, args=(model,)).start()
 
+    def update_credentials_btn(self, api_auth_toggle, user, password, worker_label):
+        worker = self.world[worker_label]
+
+        if api_auth_toggle is False:
+            worker.user = None
+            worker.password = None
+            worker.session.auth = None
+        else:
+            worker.user = user
+            worker.password = password
+            worker.session.auth = (user, password)
+        self.world.save_config()
+
     # end handlers
     def create_ui(self):
         """creates the extension UI within a gradio.Box() and returns it"""
@@ -232,6 +245,18 @@ class UI:
                         model_override_dropdown.select(self.override_worker_model,
                                                        inputs=[model_override_dropdown, worker_select_dropdown])
 
+                        # API authentication
+                        worker_api_auth_cbx = gradio.Checkbox(label='API Authentication')
+                        worker_user_field = gradio.Textbox(label='Username')
+                        worker_password_field = gradio.Textbox(label='Password')
+                        update_credentials_btn = gradio.Button(value='Update API Credentials')
+                        update_credentials_btn.click(self.update_credentials_btn, inputs=[
+                            worker_api_auth_cbx,
+                            worker_user_field,
+                            worker_password_field,
+                            worker_select_dropdown
+                        ])
+
                     with gradio.Row():
                         save_worker_btn = gradio.Button(value='Add/Update Worker')
                         save_worker_btn.click(self.save_worker_btn,
@@ -239,7 +264,8 @@ class UI:
                                                       worker_address_field,
                                                       worker_port_field,
                                                       worker_tls_cbx,
-                                                      worker_disabled_cbx],
+                                                      worker_disabled_cbx
+                                                      ],
                                               outputs=[worker_select_dropdown]
                                               )
                         remove_worker_btn = gradio.Button(value='Remove Worker', variant='stop')

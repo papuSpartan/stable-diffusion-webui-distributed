@@ -141,8 +141,8 @@ class Script(scripts.Script):
                     image=image,
                     path=p.outpath_samples if save_path_override is None else save_path_override,
                     basename="",
-                    seed=processed.all_seeds[-1],
-                    prompt=processed.all_prompts[-1],
+                    seed=image_info_post['all_seeds'][i],
+                    prompt=image_info_post['all_prompts'][i],
                     info=info_text,
                     extension=opts.samples_format
                 )
