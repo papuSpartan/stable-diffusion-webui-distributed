@@ -2,7 +2,8 @@ import os
 import subprocess
 from pathlib import Path
 import gradio
-from .shared import logger, log_level
+
+from .shared import logger, log_level, gui_handler
 from .Worker import Worker, State
 from modules.shared import state as webui_state
 from typing import List
@@ -59,6 +60,7 @@ class UI:
         """updates a simplified overview of registered workers and their jobs"""
         worker_status = ''
         workers = self.world._workers
+        logs = gui_handler.dump()
 
         for worker in workers:
             if worker.master:
@@ -66,12 +68,11 @@ class UI:
 
             worker_status += f"{worker.label} at {worker.address} is {worker.state.name}\n"
 
-        # TODO replace this with a single check to a state flag that we should make in the world class
         for worker in workers:
             if worker.state == State.WORKING:
-                return self.world.__str__(), worker_status
+                return str(self.world), worker_status, logs
 
-        return 'No active jobs!', worker_status
+        return 'No active jobs!', worker_status, logs
 
     def save_btn(self, thin_client_mode, job_timeout):
         """updates the options visible on the settings tab"""
@@ -183,16 +184,18 @@ class UI:
         with gradio.Box() as root:
             with gradio.Accordion(label='Distributed', open=False):
                 with gradio.Tab('Status') as status_tab:
-                    status = gradio.Textbox(elem_id='status', show_label=False)
+                    status = gradio.Textbox(elem_id='status', show_label=False, interactive=False)
                     status.placeholder = 'Refresh!'
-                    jobs = gradio.Textbox(elem_id='jobs', label='Jobs', show_label=True)
+                    jobs = gradio.Textbox(elem_id='jobs', label='Jobs', show_label=True, interactive=False)
                     jobs.placeholder = 'Refresh!'
+
+                    logs = gradio.Textbox(elem_id='logs', label='Log', show_label=True, interactive=False)
 
                     refresh_status_btn = gradio.Button(value='Refresh')
                     refresh_status_btn.style(size='sm')
-                    refresh_status_btn.click(self.status_btn, inputs=[], outputs=[jobs, status])
+                    refresh_status_btn.click(self.status_btn, inputs=[], outputs=[jobs, status, logs])
 
-                    status_tab.select(fn=self.status_btn, inputs=[], outputs=[jobs, status])
+                    status_tab.select(fn=self.status_btn, inputs=[], outputs=[jobs, status, logs])
 
                 with gradio.Tab('Utils'):
                     refresh_checkpoints_btn = gradio.Button(value='Refresh checkpoints')

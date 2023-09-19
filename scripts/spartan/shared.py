@@ -1,4 +1,5 @@
 import logging
+from logging import Handler
 from inspect import getsourcefile
 from typing import Union
 from rich.logging import RichHandler
@@ -22,9 +23,30 @@ logger.propagate = False  # prevent log duplication by webui since it now uses t
 logger.setLevel(log_level)
 log_path = extension_path.joinpath('distributed.log')
 file_handler = logging.FileHandler(log_path)
-file_handler.formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+file_handler.formatter = formatter
+
 logger.addHandler(rich_handler)
 logger.addHandler(file_handler)
+
+
+class Gui_Handler(Handler):
+    messages = []
+
+    def emit(self, record):
+        formatted_msg = formatter.format(record)
+        self.messages.append(formatted_msg)
+        if len(self.messages) >= 16:
+            self.messages.remove(self.messages[0])
+
+    def dump(self):
+        messages = str()
+        for msg in self.messages:
+            messages += f"{msg}\n"
+        return messages
+
+gui_handler = Gui_Handler()
+logger.addHandler(gui_handler)
 # end logging
 
 warmup_samples = 2  # number of samples to do before recording a valid benchmark sample
