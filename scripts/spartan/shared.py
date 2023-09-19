@@ -30,7 +30,7 @@ logger.addHandler(rich_handler)
 logger.addHandler(file_handler)
 
 
-class Gui_Handler(Handler):
+class GuiHandler(Handler):
     messages = []
 
     def emit(self, record):
@@ -45,7 +45,7 @@ class Gui_Handler(Handler):
             messages += f"{msg}\n"
         return messages
 
-gui_handler = Gui_Handler()
+gui_handler = GuiHandler()
 logger.addHandler(gui_handler)
 # end logging
 

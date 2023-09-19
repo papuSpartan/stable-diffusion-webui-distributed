@@ -181,7 +181,7 @@ class UI:
     # end handlers
     def create_ui(self):
         """creates the extension UI within a gradio.Box() and returns it"""
-        with gradio.Box() as root:
+        with gradio.Blocks(variant='compact') as root:  # Group() and Box() remove spacing
             with gradio.Accordion(label='Distributed', open=False):
                 with gradio.Tab('Status') as status_tab:
                     status = gradio.Textbox(elem_id='status', show_label=False, interactive=False)
@@ -198,29 +198,31 @@ class UI:
                     status_tab.select(fn=self.status_btn, inputs=[], outputs=[jobs, status, logs])
 
                 with gradio.Tab('Utils'):
-                    refresh_checkpoints_btn = gradio.Button(value='Refresh checkpoints')
-                    refresh_checkpoints_btn.style(full_width=False)
-                    refresh_checkpoints_btn.click(self.world.refresh_checkpoints)
+                    with gradio.Row():
+                        refresh_checkpoints_btn = gradio.Button(value='Refresh checkpoints')
+                        refresh_checkpoints_btn.style(full_width=False)
+                        refresh_checkpoints_btn.click(self.world.refresh_checkpoints)
 
-                    run_usr_btn = gradio.Button(value='Run user script')
-                    run_usr_btn.style(full_width=False)
-                    run_usr_btn.click(self.user_script_btn)
+                        run_usr_btn = gradio.Button(value='Run user script')
+                        run_usr_btn.style(full_width=False)
+                        run_usr_btn.click(self.user_script_btn)
 
-                    interrupt_all_btn = gradio.Button(value='Interrupt all', variant='stop')
-                    interrupt_all_btn.style(full_width=False)
-                    interrupt_all_btn.click(self.world.interrupt_remotes)
+                        reload_config_btn = gradio.Button(value='Reload config from file')
+                        reload_config_btn.style(full_width=False)
+                        reload_config_btn.click(self.world.load_config)
 
-                    redo_benchmarks_btn = gradio.Button(value='Redo benchmarks', variant='stop')
-                    redo_benchmarks_btn.style(full_width=False)
-                    redo_benchmarks_btn.click(self.benchmark_btn, inputs=[], outputs=[])
+                        reconnect_lost_workers_btn = gradio.Button(value='Attempt reconnection with remotes')
+                        reconnect_lost_workers_btn.style(full_width=False)
+                        reconnect_lost_workers_btn.click(self.world.ping_remotes)
 
-                    reload_config_btn = gradio.Button(value='Reload config from file')
-                    reload_config_btn.style(full_width=False)
-                    reload_config_btn.click(self.world.load_config)
+                    with gradio.Row():
+                        interrupt_all_btn = gradio.Button(value='Interrupt all', variant='stop')
+                        interrupt_all_btn.style(full_width=False)
+                        interrupt_all_btn.click(self.world.interrupt_remotes)
 
-                    reconnect_lost_workers_btn = gradio.Button(value='Attempt reconnection with remotes')
-                    reconnect_lost_workers_btn.style(full_width=False)
-                    reconnect_lost_workers_btn.click(self.world.ping_remotes)
+                        redo_benchmarks_btn = gradio.Button(value='Redo benchmarks', variant='stop')
+                        redo_benchmarks_btn.style(full_width=False)
+                        redo_benchmarks_btn.click(self.benchmark_btn, inputs=[], outputs=[])
 
                     if log_level == 'DEBUG':
                         clear_queue_btn = gradio.Button(value='Clear local webui queue', variant='stop')
@@ -243,7 +245,7 @@ class UI:
                         label='disabled'
                     )
 
-                    with gradio.Accordion(label='Advanced'):
+                    with gradio.Accordion(label='Advanced', open=False):
                         model_override_dropdown = gradio.Dropdown(label='Model override')
                         model_override_dropdown.select(self.override_worker_model,
                                                        inputs=[model_override_dropdown, worker_select_dropdown])
@@ -310,4 +312,4 @@ class UI:
                         """
                     )
 
-            return root, [thin_client_cbx, job_timeout]
+            return root.children, [thin_client_cbx, job_timeout]
