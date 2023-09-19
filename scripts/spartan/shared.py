@@ -45,6 +45,7 @@ class GuiHandler(Handler):
             messages += f"{msg}\n"
         return messages
 
+
 gui_handler = GuiHandler()
 logger.addHandler(gui_handler)
 # end logging
@@ -52,7 +53,7 @@ logger.addHandler(gui_handler)
 warmup_samples = 2  # number of samples to do before recording a valid benchmark sample
 
 
-class Benchmark_Payload(BaseModel):
+class BenchmarkPayload(BaseModel):
     validate_assignment = True
     prompt: str = Field(default="A herd of cows grazing at the bottom of a sunny valley")
     negative_prompt: str = Field(default="")
@@ -60,4 +61,6 @@ class Benchmark_Payload(BaseModel):
     width: int = Field(default=512)
     height: int = Field(default=512)
     batch_size: int = Field(default=1)
-benchmark_payload: Union[Benchmark_Payload, None] = None
+
+
+benchmark_payload: Union[BenchmarkPayload, None] = None
