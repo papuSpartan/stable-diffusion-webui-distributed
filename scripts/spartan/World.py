@@ -161,6 +161,11 @@ class World:
         else:
             for key in kwargs:
                 if hasattr(original, key):
+                    # TODO only necessary because this is skipping Worker.__init__ and the pyd model is saving the state as an int instead of an actual enum
+                    if key == 'state':
+                        original.state = kwargs[key] if type(kwargs[key]) is State else State(kwargs[key])
+                        continue
+
                     setattr(original, key, kwargs[key])
 
             return original
