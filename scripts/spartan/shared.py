@@ -30,18 +30,19 @@ logger.addHandler(rich_handler)
 logger.addHandler(file_handler)
 
 
+gui_formatter = logging.Formatter('%(levelname)s - %(message)s')
 class GuiHandler(Handler):
     messages = []
 
     def emit(self, record):
-        formatted_msg = formatter.format(record)
+        formatted_msg = gui_formatter.format(record)
         self.messages.append(formatted_msg)
         if len(self.messages) >= 16:
             self.messages.remove(self.messages[0])
 
     def dump(self):
         messages = str()
-        for msg in self.messages:
+        for msg in reversed(self.messages):
             messages += f"{msg}\n"
         return messages
 
