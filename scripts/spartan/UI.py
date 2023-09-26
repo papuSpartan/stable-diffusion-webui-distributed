@@ -189,7 +189,14 @@ class UI:
                     jobs = gradio.Textbox(elem_id='jobs', label='Jobs', show_label=True, interactive=False)
                     jobs.placeholder = 'Refresh!'
 
-                    logs = gradio.Textbox(elem_id='logs', label='Log', show_label=True, interactive=False, max_lines=4)
+                    logs = gradio.Textbox(
+                        elem_id='logs',
+                        label='Log',
+                        show_label=True,
+                        interactive=False,
+                        max_lines=4,
+                        info='top-most message is newest'
+                    )
 
                     refresh_status_btn = gradio.Button(value='Refresh')
                     refresh_status_btn.style(size='sm')
