@@ -129,10 +129,12 @@ class Script(scripts.Script):
 
             try:
                 info_text = image_info_post['infotexts'][i]
+                logger.critical(info_text)
             except IndexError:
                 if not grid:
                     logger.warning(f"image {true_image_pos + 1} was missing info-text")
                 info_text = processed.infotexts[0]
+            info_text += f", Worker Label: {job.worker.label}"
             processed.infotexts.append(info_text)
 
             # automatically save received image to local disk if desired
