@@ -50,7 +50,7 @@ class Job:
 
     def __str__(self):
         prefix = ''
-        suffix = f"Job: {self.batch_size} images. Owned by '{self.worker.label}'. Rate: {self.worker.avg_ipm}ipm"
+        suffix = f"Job: {self.batch_size} image(s) owned by '{self.worker.label}'. Rate: {self.worker.avg_ipm:0.2f} ipm"
         if self.complementary:
             prefix = "(complementary) "
 

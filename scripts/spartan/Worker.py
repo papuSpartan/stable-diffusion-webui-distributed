@@ -324,6 +324,7 @@ class Worker:
                 payload.pop('cached_c', None)
                 payload.pop('uc', None)
                 payload.pop('c', None)
+                payload.pop('cached_hr_c', None)
                 payload.pop('cached_hr_uc', None)
 
                 # if img2img then we need to b64 encode the init images
