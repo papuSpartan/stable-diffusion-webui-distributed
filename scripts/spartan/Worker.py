@@ -319,12 +319,13 @@ class Worker:
                 s_tmax = payload.get('s_tmax', 0.0)
                 if s_tmax > 1e308:
                     payload['s_tmax'] = 1e308
-                # remove cached tensor from payload as it is not serializable and not needed by the api
+                # remove unserializable caches
                 payload.pop('cached_uc', None)
-                # these three may be fine but the api still definitely does not need them
                 payload.pop('cached_c', None)
                 payload.pop('uc', None)
                 payload.pop('c', None)
+                payload.pop('cached_hr_uc', None)
+
                 # if img2img then we need to b64 encode the init images
                 init_images = payload.get('init_images', None)
                 if init_images is not None:

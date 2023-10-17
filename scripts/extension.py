@@ -129,7 +129,6 @@ class Script(scripts.Script):
 
             try:
                 info_text = image_info_post['infotexts'][i]
-                logger.critical(info_text)
             except IndexError:
                 if not grid:
                     logger.warning(f"image {true_image_pos + 1} was missing info-text")
