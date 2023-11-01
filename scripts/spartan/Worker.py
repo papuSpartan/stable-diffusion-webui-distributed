@@ -557,6 +557,9 @@ class Worker:
         else:
             logger.error(f"worker '{self.label}' at {self} was unreachable, will avoid in the future")
             self.state = State.UNAVAILABLE
+            # invalidate models cache so that if/when worker reconnects, a new POST is sent to resync loaded models
+            self.loaded_model = None
+            self.loaded_vae = None
 
     def available_models(self) -> Union[List[str], None]:
         if self.state == State.UNAVAILABLE or self.state == State.DISABLED:
