@@ -86,9 +86,8 @@ class Worker:
     }
 
     def __init__(self, address: Union[str, None] = None, port: int = 7860, label: Union[str, None] = None,
-                 verify_remotes: bool = True, master: bool = False, tls: bool = False,
-                 auth: Union[str, None, Tuple, List] = None, state: State = State.IDLE,
-                 avg_ipm: float = 1.0, eta_percent_error=None
+                 verify_remotes: bool = True, master: bool = False, tls: bool = False, state: State = State.IDLE,
+                 avg_ipm: float = 1.0, eta_percent_error=None, user: str = None, password: str = None
                  ):
 
         if eta_percent_error is None:
@@ -140,22 +139,12 @@ class Worker:
             raise InvalidWorkerResponse("Worker address cannot be None")
 
         # auth
-        self.user = None
-        self.password = None
-        if auth is not None:
-            if isinstance(auth, str):
-                self.user = auth.split(':')[0]
-                self.password = auth.split(':')[1]
-            elif isinstance(auth, (tuple, list)):
-                self.user = auth[0]
-                self.password = auth[1]
-            else:
-                raise ValueError(f"Invalid auth value: {auth}")
-        self.auth: Union[Tuple[str, str], None] = (self.user, self.password) if self.user is not None else None
+        self.user = user
+        self.password = password
 
         # requests session
         self.session = requests.Session()
-        self.session.auth = self.auth
+        self.session.auth = (self.user, self.password)
         # sometimes breaks: https://github.com/psf/requests/issues/2255
         self.session.verify = not verify_remotes
 
@@ -330,12 +319,14 @@ class Worker:
                 s_tmax = payload.get('s_tmax', 0.0)
                 if s_tmax > 1e308:
                     payload['s_tmax'] = 1e308
-                # remove cached tensor from payload as it is not serializable and not needed by the api
+                # remove unserializable caches
                 payload.pop('cached_uc', None)
-                # these three may be fine but the api still definitely does not need them
                 payload.pop('cached_c', None)
                 payload.pop('uc', None)
                 payload.pop('c', None)
+                payload.pop('cached_hr_c', None)
+                payload.pop('cached_hr_uc', None)
+
                 # if img2img then we need to b64 encode the init images
                 init_images = payload.get('init_images', None)
                 if init_images is not None:
@@ -566,6 +557,9 @@ class Worker:
         else:
             logger.error(f"worker '{self.label}' at {self} was unreachable, will avoid in the future")
             self.state = State.UNAVAILABLE
+            # invalidate models cache so that if/when worker reconnects, a new POST is sent to resync loaded models
+            self.loaded_model = None
+            self.loaded_vae = None
 
     def available_models(self) -> Union[List[str], None]:
         if self.state == State.UNAVAILABLE or self.state == State.DISABLED:
@@ -609,5 +603,4 @@ class Worker:
             self.loaded_model = model_name
             if vae is not None:
                 self.loaded_vae = vae
-
 

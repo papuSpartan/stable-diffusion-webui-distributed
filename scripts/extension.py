@@ -133,6 +133,7 @@ class Script(scripts.Script):
                 if not grid:
                     logger.warning(f"image {true_image_pos + 1} was missing info-text")
                 info_text = processed.infotexts[0]
+            info_text += f", Worker Label: {job.worker.label}"
             processed.infotexts.append(info_text)
 
             # automatically save received image to local disk if desired
@@ -141,8 +142,8 @@ class Script(scripts.Script):
                     image=image,
                     path=p.outpath_samples if save_path_override is None else save_path_override,
                     basename="",
-                    seed=processed.all_seeds[-1],
-                    prompt=processed.all_prompts[-1],
+                    seed=image_info_post['all_seeds'][i],
+                    prompt=image_info_post['all_prompts'][i],
                     info=info_text,
                     extension=opts.samples_format
                 )

@@ -2,7 +2,8 @@ import os
 import subprocess
 from pathlib import Path
 import gradio
-from .shared import logger, log_level
+
+from .shared import logger, log_level, gui_handler
 from .Worker import Worker, State
 from modules.shared import state as webui_state
 from typing import List
@@ -59,6 +60,7 @@ class UI:
         """updates a simplified overview of registered workers and their jobs"""
         worker_status = ''
         workers = self.world._workers
+        logs = gui_handler.dump()
 
         for worker in workers:
             if worker.master:
@@ -66,12 +68,11 @@ class UI:
 
             worker_status += f"{worker.label} at {worker.address} is {worker.state.name}\n"
 
-        # TODO replace this with a single check to a state flag that we should make in the world class
         for worker in workers:
             if worker.state == State.WORKING:
-                return self.world.__str__(), worker_status
+                return str(self.world), worker_status, logs
 
-        return 'No active jobs!', worker_status
+        return 'No active jobs!', worker_status, logs
 
     def save_btn(self, thin_client_mode, job_timeout):
         """updates the options visible on the settings tab"""
@@ -164,47 +165,71 @@ class UI:
             # set model on remote early
             Thread(target=worker.load_options, args=(model,)).start()
 
+    def update_credentials_btn(self, api_auth_toggle, user, password, worker_label):
+        worker = self.world[worker_label]
+
+        if api_auth_toggle is False:
+            worker.user = None
+            worker.password = None
+            worker.session.auth = None
+        else:
+            worker.user = user
+            worker.password = password
+            worker.session.auth = (user, password)
+        self.world.save_config()
+
     # end handlers
     def create_ui(self):
         """creates the extension UI within a gradio.Box() and returns it"""
-        with gradio.Box() as root:
+        with gradio.Blocks(variant='compact') as root:  # Group() and Box() remove spacing
             with gradio.Accordion(label='Distributed', open=False):
                 with gradio.Tab('Status') as status_tab:
-                    status = gradio.Textbox(elem_id='status', show_label=False)
+                    status = gradio.Textbox(elem_id='status', show_label=False, interactive=False)
                     status.placeholder = 'Refresh!'
-                    jobs = gradio.Textbox(elem_id='jobs', label='Jobs', show_label=True)
+                    jobs = gradio.Textbox(elem_id='jobs', label='Jobs', show_label=True, interactive=False)
                     jobs.placeholder = 'Refresh!'
+
+                    logs = gradio.Textbox(
+                        elem_id='logs',
+                        label='Log',
+                        show_label=True,
+                        interactive=False,
+                        max_lines=4,
+                        info='top-most message is newest'
+                    )
 
                     refresh_status_btn = gradio.Button(value='Refresh')
                     refresh_status_btn.style(size='sm')
-                    refresh_status_btn.click(self.status_btn, inputs=[], outputs=[jobs, status])
+                    refresh_status_btn.click(self.status_btn, inputs=[], outputs=[jobs, status, logs])
 
-                    status_tab.select(fn=self.status_btn, inputs=[], outputs=[jobs, status])
+                    status_tab.select(fn=self.status_btn, inputs=[], outputs=[jobs, status, logs])
 
                 with gradio.Tab('Utils'):
-                    refresh_checkpoints_btn = gradio.Button(value='Refresh checkpoints')
-                    refresh_checkpoints_btn.style(full_width=False)
-                    refresh_checkpoints_btn.click(self.world.refresh_checkpoints)
+                    with gradio.Row():
+                        refresh_checkpoints_btn = gradio.Button(value='Refresh checkpoints')
+                        refresh_checkpoints_btn.style(full_width=False)
+                        refresh_checkpoints_btn.click(self.world.refresh_checkpoints)
 
-                    run_usr_btn = gradio.Button(value='Run user script')
-                    run_usr_btn.style(full_width=False)
-                    run_usr_btn.click(self.user_script_btn)
+                        run_usr_btn = gradio.Button(value='Run user script')
+                        run_usr_btn.style(full_width=False)
+                        run_usr_btn.click(self.user_script_btn)
 
-                    interrupt_all_btn = gradio.Button(value='Interrupt all', variant='stop')
-                    interrupt_all_btn.style(full_width=False)
-                    interrupt_all_btn.click(self.world.interrupt_remotes)
+                        reload_config_btn = gradio.Button(value='Reload config from file')
+                        reload_config_btn.style(full_width=False)
+                        reload_config_btn.click(self.world.load_config)
 
-                    redo_benchmarks_btn = gradio.Button(value='Redo benchmarks', variant='stop')
-                    redo_benchmarks_btn.style(full_width=False)
-                    redo_benchmarks_btn.click(self.benchmark_btn, inputs=[], outputs=[])
+                        reconnect_lost_workers_btn = gradio.Button(value='Attempt reconnection with remotes')
+                        reconnect_lost_workers_btn.style(full_width=False)
+                        reconnect_lost_workers_btn.click(self.world.ping_remotes)
 
-                    reload_config_btn = gradio.Button(value='Reload config from file')
-                    reload_config_btn.style(full_width=False)
-                    reload_config_btn.click(self.world.load_config)
+                    with gradio.Row():
+                        interrupt_all_btn = gradio.Button(value='Interrupt all', variant='stop')
+                        interrupt_all_btn.style(full_width=False)
+                        interrupt_all_btn.click(self.world.interrupt_remotes)
 
-                    reconnect_lost_workers_btn = gradio.Button(value='Attempt reconnection with remotes')
-                    reconnect_lost_workers_btn.style(full_width=False)
-                    reconnect_lost_workers_btn.click(self.world.ping_remotes)
+                        redo_benchmarks_btn = gradio.Button(value='Redo benchmarks', variant='stop')
+                        redo_benchmarks_btn.style(full_width=False)
+                        redo_benchmarks_btn.click(self.benchmark_btn, inputs=[], outputs=[])
 
                     if log_level == 'DEBUG':
                         clear_queue_btn = gradio.Button(value='Clear local webui queue', variant='stop')
@@ -227,10 +252,22 @@ class UI:
                         label='disabled'
                     )
 
-                    with gradio.Accordion(label='Advanced'):
+                    with gradio.Accordion(label='Advanced', open=False):
                         model_override_dropdown = gradio.Dropdown(label='Model override')
                         model_override_dropdown.select(self.override_worker_model,
                                                        inputs=[model_override_dropdown, worker_select_dropdown])
+
+                        # API authentication
+                        worker_api_auth_cbx = gradio.Checkbox(label='API Authentication')
+                        worker_user_field = gradio.Textbox(label='Username')
+                        worker_password_field = gradio.Textbox(label='Password')
+                        update_credentials_btn = gradio.Button(value='Update API Credentials')
+                        update_credentials_btn.click(self.update_credentials_btn, inputs=[
+                            worker_api_auth_cbx,
+                            worker_user_field,
+                            worker_password_field,
+                            worker_select_dropdown
+                        ])
 
                     with gradio.Row():
                         save_worker_btn = gradio.Button(value='Add/Update Worker')
@@ -239,7 +276,8 @@ class UI:
                                                       worker_address_field,
                                                       worker_port_field,
                                                       worker_tls_cbx,
-                                                      worker_disabled_cbx],
+                                                      worker_disabled_cbx
+                                                      ],
                                               outputs=[worker_select_dropdown]
                                               )
                         remove_worker_btn = gradio.Button(value='Remove Worker', variant='stop')
@@ -281,4 +319,4 @@ class UI:
                         """
                     )
 
-            return root, [thin_client_cbx, job_timeout]
+            return root.children, [thin_client_cbx, job_timeout]

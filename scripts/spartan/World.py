@@ -11,13 +11,10 @@ import os
 import time
 from typing import List, Dict, Union
 from threading import Thread
-from inspect import getsourcefile
-from os.path import abspath
-from pathlib import Path
 from modules.processing import process_images, StableDiffusionProcessingTxt2Img
 import modules.shared as shared
 from .Worker import Worker, State
-from .shared import logger, warmup_samples
+from .shared import logger, warmup_samples, extension_path
 from .pmodels import Config_Model, Benchmark_Payload
 from . import shared as sh
 
@@ -53,7 +50,7 @@ class Job:
 
     def __str__(self):
         prefix = ''
-        suffix = f"Job: {self.batch_size} images. Owned by '{self.worker.label}'. Rate: {self.worker.avg_ipm}ipm"
+        suffix = f"Job: {self.batch_size} image(s) owned by '{self.worker.label}'. Rate: {self.worker.avg_ipm:0.2f} ipm"
         if self.complementary:
             prefix = "(complementary) "
 
@@ -70,7 +67,6 @@ class World:
     """
 
     # I'd rather keep the sdwui root directory clean.
-    extension_path = Path(abspath(getsourcefile(lambda: 0))).parent.parent.parent
     config_path = shared.cmd_opts.distributed_config
     old_config_path = worker_info_path = extension_path.joinpath('workers.json')
 
@@ -164,8 +160,12 @@ class World:
             return new
         else:
             for key in kwargs:
-                attribute = getattr(original, key, None)
-                if attribute is not None:
+                if hasattr(original, key):
+                    # TODO only necessary because this is skipping Worker.__init__ and the pyd model is saving the state as an int instead of an actual enum
+                    if key == 'state':
+                        original.state = kwargs[key] if type(kwargs[key]) is State else State(kwargs[key])
+                        continue
+
                     setattr(original, key, kwargs[key])
 
             return original
@@ -534,13 +534,7 @@ class World:
         config_raw = self.config()
         if config_raw is None:
             logger.debug("cannot parse null config (present but empty config file?)")
-            why ={"prompt": "A herd of cows grazing at the bottom of a sunny valley",
-                "negative_prompt": "",
-                "steps": 20,
-                "width": 512,
-                "height": 512,
-                "batch_size": 1}
-            sh.benchmark_payload = Benchmark_Payload(**why)
+            sh.benchmark_payload = Benchmark_Payload()
             return
 
         config = Config_Model(**config_raw)

@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 class Benchmark_Payload(BaseModel):
     prompt: str = Field(default="A herd of cows grazing at the bottom of a sunny valley")
-    negative_prompt: str
+    negative_prompt: str = Field(default="")
     steps: int = Field(default=20)
     width: int = Field(default=512)
     height: int = Field(default=512)
@@ -29,6 +29,8 @@ class Worker_Model(BaseModel):
         default=False
     )
     state: Optional[Any] = Field(default=1, description="The last known state of this worker")
+    user: Optional[str] = Field(description="The username to be used when authenticating with this worker")
+    password: Optional[str] = Field(description="The password to be used when authenticating with this worker")
 
 class Config_Model(BaseModel):
     workers: List[Dict[str, Worker_Model]]
