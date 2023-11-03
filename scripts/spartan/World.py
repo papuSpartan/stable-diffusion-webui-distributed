@@ -589,9 +589,10 @@ class World:
                 logger.debug(f"checking if worker '{worker.label}' is reachable...")
                 reachable = worker.reachable()
                 if reachable:
-                    if worker.state == State.IDLE:
+                    if worker.queried and worker.state == State.IDLE:  # TODO worker.queried
                         continue
 
+                    worker.supported_scripts = worker.session.get(url=worker.full_url('scripts')).json()
                     logger.info(f"worker '{worker.label}' is online, marking as available")
                     worker.state = State.IDLE
                 else:

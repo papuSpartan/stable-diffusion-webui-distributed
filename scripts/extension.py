@@ -260,11 +260,11 @@ class Script(scripts.Script):
                 continue
             else:
                 # other scripts to pack
-                # args_script_pack = {}
-                # args_script_pack[title] = {"args": []}
-                # for arg in p.script_args[script.args_from:script.args_to]:
-                #     args_script_pack[title]["args"].append(arg)
-                # packed_script_args.append(args_script_pack)
+                args_script_pack = {}
+                args_script_pack[title] = {"args": []}
+                for arg in p.script_args[script.args_from:script.args_to]:
+                    args_script_pack[title]["args"].append(arg)
+                packed_script_args.append(args_script_pack)
                 # https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111/issues/12#issuecomment-1480382514
                 if Script.runs_since_init < 1:
                     incompat_list.append(title)

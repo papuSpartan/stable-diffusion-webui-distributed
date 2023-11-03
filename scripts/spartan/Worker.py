@@ -15,10 +15,12 @@ from modules.api.api import encode_pil_to_base64
 import re
 from . import shared as sh
 from .shared import logger, warmup_samples
+
 try:
     from webui import server_name
 except ImportError:  # webui 95821f0132f5437ef30b0dbcac7c51e55818c18f and newer
     from modules.initialize_util import gradio_server_name
+
     server_name = gradio_server_name()
 from .pmodels import Worker_Model
 
@@ -60,8 +62,6 @@ class Worker:
             InvalidWorkerResponse: If the worker responds with an invalid or unexpected response.
         """
 
-
-
     # Percentages representing (roughly) how much faster a given sampler is in comparison to Euler A.
     # We compare to euler a because that is what we currently benchmark each node with.
     other_to_euler_a = {
@@ -101,6 +101,7 @@ class Worker:
         self.response_time = None
         self.loaded_model = ''
         self.loaded_vae = ''
+        self.supported_scripts = None
         self.label = label
         self.tls = tls
         self.verify_remotes = verify_remotes
@@ -230,8 +231,8 @@ class Worker:
             eta += self.batch_eta_hr(payload=payload)
 
         # show effect of image size
-        real_pix_to_benched = (payload['width'] * payload['height'])\
-            / (sh.benchmark_payload.width * sh.benchmark_payload.height)
+        real_pix_to_benched = (payload['width'] * payload['height']) \
+                              / (sh.benchmark_payload.width * sh.benchmark_payload.height)
         eta = eta * real_pix_to_benched
 
         # show effect of using a sampler other than euler a
@@ -329,7 +330,9 @@ class Worker:
 
                 # if img2img then we need to b64 encode the init images
                 init_images = payload.get('init_images', None)
+                mode = 'txt2img'
                 if init_images is not None:
+                    mode = 'img2img'  # for use in checking script compat
                     images = []
                     for image in init_images:
                         buffer = io.BytesIO()
@@ -337,6 +340,30 @@ class Worker:
                         image = 'data:image/png;base64,' + str(base64.b64encode(buffer.getvalue()), 'utf-8')
                         images.append(image)
                     payload['init_images'] = images
+
+                compatible_scripts = {}
+                incompatible_scripts = []
+                for script in self.supported_scripts[mode]:
+                    match = False
+                    for local_script in payload['alwayson_scripts']:
+                        if str.lower(local_script) == script:
+                            compatible_scripts[local_script] = payload['alwayson_scripts'][local_script]
+                            match = True
+                            break
+
+                    if not match:
+                        incompatible_scripts.append(script)
+
+                message = "local scripts(s): "
+                for script in range(0, len(incompatible_scripts)):
+                    message += f"\[{incompatible_scripts[script]}]"
+                    if script < len(incompatible_scripts) - 1:
+                        message += ', '
+                message += f" seem to be unsupported by worker '{self.label}'\n"
+                message += f"these may simply need to be installed on '{self.label}' for full functionality"
+                logger.warning(message)
+
+                payload['alwayson_scripts'] = compatible_scripts
 
                 # if an image mask is present
                 image_mask = payload.get('image_mask', None)
@@ -373,6 +400,7 @@ class Worker:
                         response_queue.put(response)
                     except Exception as e:
                         response_queue.put(e)  # forwarding thrown exceptions to parent thread
+
                 request_thread = Thread(target=preemptible_request, args=(response_queue,))
                 interrupting = False
                 start = time.time()
@@ -603,4 +631,3 @@ class Worker:
             self.loaded_model = model_name
             if vae is not None:
                 self.loaded_vae = vae
-
