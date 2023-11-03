@@ -592,7 +592,24 @@ class World:
                     if worker.queried and worker.state == State.IDLE:  # TODO worker.queried
                         continue
 
-                    worker.supported_scripts = worker.session.get(url=worker.full_url('scripts')).json()
+                    # for now skip/remove scripts that are not "always on" since there is currently no way to run
+                    # them at the same time as distributed
+                    supported_scripts = {
+                        'txt2img': [],
+                        'img2img': []
+                    }
+                    script_info = worker.session.get(url=worker.full_url('script-info')).json()
+
+                    for key in script_info:
+                        name = key.get('name', None)
+
+                        if name is not None:
+                            is_alwayson = key.get('is_alwayson', False)
+                            is_img2img = key.get('is_img2img', False)
+                            if is_alwayson:
+                                supported_scripts['img2img' if is_img2img else 'txt2img'].append(name)
+                    worker.supported_scripts = supported_scripts
+
                     logger.info(f"worker '{worker.label}' is online, marking as available")
                     worker.state = State.IDLE
                 else:
