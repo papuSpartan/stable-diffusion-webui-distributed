@@ -354,7 +354,7 @@ class Worker:
                     if not match:
                         incompatible_scripts.append(script)
 
-                message = "local scripts(s): "
+                message = "local script(s): "
                 for script in range(0, len(incompatible_scripts)):
                     message += f"\[{incompatible_scripts[script]}]"
                     if script < len(incompatible_scripts) - 1:
