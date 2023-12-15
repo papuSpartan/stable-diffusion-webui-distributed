@@ -24,6 +24,7 @@ from scripts.spartan.control_net import pack_control_net
 from modules.processing import fix_seed, Processed
 import signal
 import sys
+import gradio
 
 old_sigint_handler = signal.getsignal(signal.SIGINT)
 old_sigterm_handler = signal.getsignal(signal.SIGTERM)
@@ -179,7 +180,9 @@ class Script(scripts.Script):
                 continue
             except TypeError as e:
                 if job.worker.response is None:
-                    logger.error(f"worker '{job.worker.label}' had no response")
+                    msg = f"worker '{job.worker.label}' had no response"
+                    logger.error(msg)
+                    gradio.Warning("Distributed: "+msg)
                 else:
                     logger.exception(e)
                 continue
@@ -193,7 +196,9 @@ class Script(scripts.Script):
                 processed_inject_image(image=image, info_index=i, response=job.worker.response)
 
         if donor_worker is None:
-            logger.critical("couldn't collect any responses, distributed will do nothing")
+            msg = "couldn't collect any responses, the extension will have no effect"
+            logger.critical(msg)
+            gradio.Warning("Distributed: "+msg)
             return
 
         # generate and inject grid
@@ -314,7 +319,14 @@ class Script(scripts.Script):
 
         # check if anything even needs to be done
         if len(Script.world.jobs) == 1 and Script.world.jobs[0].worker.master:
-            logger.debug(f"distributed doesn't have to do anything, returning control to webui")
+
+            if payload['batch_size'] >= 2:
+                msg = f"all remote workers are offline or unreachable"
+                gradio.Info(f"Distributed: "+msg)
+                logger.critical(msg)
+
+            logger.debug(f"distributed has nothing to do, returning control to webui")
+
             return
 
         for job in Script.world.jobs:

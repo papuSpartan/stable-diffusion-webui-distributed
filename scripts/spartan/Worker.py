@@ -1,4 +1,5 @@
 import io
+# import gradio
 import requests
 from typing import List, Tuple, Union
 import math
@@ -245,7 +246,7 @@ class Worker:
                 else:
                     eta += (eta * abs((percent_difference / 100)))
             except KeyError:
-                logger.warning(f"Sampler '{payload['sampler_name']}' efficiency is not recorded.\n")
+                logger.warning(f"Efficiency of sampler '{payload['sampler_name']}' has not been recorded.\n")
                 # in this case the sampler will be treated as having the same efficiency as Euler a
 
         # adjust for a known inaccuracy in our estimation of this worker using average percent error
@@ -294,7 +295,9 @@ class Worker:
                 except KeyError:
                     try:
                         error = memory_response['cuda']['error']
-                        logger.warning(f"CUDA doesn't seem to be available for worker '{self.label}'\nError: {error}")
+                        msg = f"CUDA seems unavailable for worker '{self.label}'\nError: {error}"
+                        logger.warning(msg)
+                        # gradio.Warning("Distributed: "+msg)
                     except KeyError:
                         logger.error(f"An error occurred querying memory statistics from worker '{self.label}'\n"
                                      f"{memory_response}")
@@ -378,6 +381,7 @@ class Worker:
                     json.dumps(payload)
                 except Exception as e:
                     logger.error(f"Failed to serialize payload: \n{payload}")
+                    # gradio.Info("Distributed: failed to serialize payload")
                     raise e
 
                 # the main api requests sent to either the txt2img or img2img route
@@ -541,15 +545,20 @@ class Worker:
         return avg_ipm_result
 
     def refresh_checkpoints(self):
+        # gradio.Info("refreshing checkpoints")
         try:
             model_response = self.session.post(self.full_url('refresh-checkpoints'))
             lora_response = self.session.post(self.full_url('refresh-loras'))
 
             if model_response.status_code != 200:
-                logger.error(f"Failed to refresh models for worker '{self.label}'\nCode <{model_response.status_code}>")
+                msg = f"Failed to refresh models for worker '{self.label}'\nCode <{model_response.status_code}>"
+                logger.error(msg)
+                # gradio.Warning("Distributed: "+msg)
 
             if lora_response.status_code != 200:
-                logger.error(f"Failed to refresh LORA's for worker '{self.label}'\nCode <{lora_response.status_code}>")
+                msg = f"Failed to refresh LORA's for worker '{self.label}'\nCode <{lora_response.status_code}>"
+                logger.error(msg)
+                # gradio.Warning("Distributed: "+msg)
         except requests.exceptions.ConnectionError:
             self.mark_unreachable()
 
@@ -583,7 +592,9 @@ class Worker:
         if self.state == State.DISABLED:
             logger.debug(f"worker '{self.label}' is disabled... refusing to mark as unavailable")
         else:
-            logger.error(f"worker '{self.label}' at {self} was unreachable, will avoid in the future")
+            msg = f"worker '{self.label}' at {self} was unreachable and will be avoided until reconnection"
+            logger.error(msg)
+            # gradio.Warning("Distributed: "+msg)
             self.state = State.UNAVAILABLE
             # invalidate models cache so that if/when worker reconnects, a new POST is sent to resync loaded models
             self.loaded_model = None

@@ -11,6 +11,7 @@ import os
 import time
 from typing import List, Dict, Union
 from threading import Thread
+import gradio
 from modules.processing import process_images, StableDiffusionProcessingTxt2Img
 import modules.shared as shared
 from .Worker import Worker, State
@@ -497,7 +498,10 @@ class World:
         }
         """
         if not os.path.exists(self.config_path):
-            logger.error(f"Config was not found at '{self.config_path}'")
+            msg = f"Config was not found at '{self.config_path}'"
+            logger.error(msg)
+            gradio.Warning("Distributed: "+msg)
+
             if os.path.exists(self.old_config_path):
 
                 with open(self.old_config_path) as config_file:
@@ -610,7 +614,11 @@ class World:
                                 supported_scripts['img2img' if is_img2img else 'txt2img'].append(name)
                     worker.supported_scripts = supported_scripts
 
-                    logger.info(f"worker '{worker.label}' is online, marking as available")
+                    msg = f"worker '{worker.label}' is online"
+                    logger.info(msg)
+                    gradio.Info("Distributed: "+msg)
                     worker.state = State.IDLE
                 else:
-                    logger.info(f"worker '{worker.label}' is unreachable")
+                    msg = f"worker '{worker.label}' is unreachable"
+                    logger.info(msg)
+                    gradio.Warning("Distributed: "+msg)
