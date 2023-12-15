@@ -140,8 +140,8 @@ class Worker:
             raise InvalidWorkerResponse("Worker address cannot be None")
 
         # auth
-        self.user = user
-        self.password = password
+        self.user = str(user)  # casting these "prevents future issues with requests"
+        self.password = str(password)
 
         # requests session
         self.session = requests.Session()
