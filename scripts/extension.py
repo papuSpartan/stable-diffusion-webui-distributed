@@ -274,7 +274,6 @@ class Script(scripts.Script):
         # strip scripts that aren't yet supported and warn user
         packed_script_args: List[dict] = []  # list of api formatted per-script argument objects
         # { "script_name": { "args": ["value1", "value2", ...] }
-        incompat_list = []
         for script in p.scripts.scripts:
             if script.alwayson is not True:
                 continue
@@ -296,22 +295,11 @@ class Script(scripts.Script):
                 continue
             else:
                 # other scripts to pack
-                args_script_pack = {}
-                args_script_pack[title] = {"args": []}
+                args_script_pack = {title: {"args": []}}
                 for arg in p.script_args[script.args_from:script.args_to]:
                     args_script_pack[title]["args"].append(arg)
                 packed_script_args.append(args_script_pack)
                 # https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111/issues/12#issuecomment-1480382514
-                if Script.runs_since_init < 1:
-                    incompat_list.append(title)
-
-        if Script.runs_since_init < 1 and len(incompat_list) >= 1:
-            m = "Distributed doesn't yet support:"
-            for i in range(0, len(incompat_list)):
-                m += f" {incompat_list[i]}"
-                if i < len(incompat_list) - 1:
-                    m += ","
-            logger.warning(m)
 
         # encapsulating the request object within a txt2imgreq object is deprecated and no longer works
         # see test/basic_features/txt2img_test.py for an example
@@ -322,7 +310,6 @@ class Script(scripts.Script):
             del payload['script_args']
         except KeyError:
             del payload['script_args_value']
-
 
         payload['alwayson_scripts'] = {}
         for packed in packed_script_args:
