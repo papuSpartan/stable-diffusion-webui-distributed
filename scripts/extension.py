@@ -10,7 +10,7 @@ from modules import scripts
 from modules import processing
 from threading import Thread, current_thread
 from PIL import Image
-from typing import List
+from typing import List, Callable
 import urllib3
 import copy
 from modules.images import save_image
@@ -40,10 +40,11 @@ class Script(scripts.Script):
     is_img2img = True
     is_txt2img = True
     alwayson = False
-    first_run = True
     master_start = None
     runs_since_init = 0
     name = "distributed"
+    is_dropdown_handler_injected = False
+    original_dropdown_handler: Callable = None
 
     if verify_remotes is False:
         logger.warning(f"You have chosen to forego the verification of worker TLS certificates")
@@ -233,12 +234,42 @@ class Script(scripts.Script):
         except WorldAlreadyInitialized:
             Script.world.update_world(total_batch_size=batch_size)
 
+
+    @staticmethod
+    def inject_model_dropdown_handler() -> Callable:
+        # get original handler for model dropdown
+        model_dropdown = opts.data_labels.get('sd_model_checkpoint')
+        original_handler = model_dropdown.onchange
+
+        # new handler encompassing functionality of the original handler plus the function of syncing remote workers
+        def on_model_dropdown():
+            for worker in Script.world.get_workers():
+                if worker.master:
+                    continue
+
+                Thread(
+                    target=worker.load_options,
+                    args=(opts.sd_model_checkpoint,),
+                    name=f"{worker.label}_on_dropdown_model_load").start()
+
+            original_handler()  # load weights locally as usual using the original handler
+
+        model_dropdown.onchange = on_model_dropdown
+        return original_handler
+
     # p's type is
     # "modules.processing.StableDiffusionProcessingTxt2Img"
     # runs every time the generate button is hit
     def run(self, p, *args):
+        # TODO cleanup mechanism for handlers when extension is disabled
         current_thread().name = "distributed_main"
         Script.initialize(initial_payload=p)
+
+        # reduce delays by loading weights on remotes as soon as they are selected from the local models dropdown
+        if not Script.is_dropdown_handler_injected:
+            Script.original_model_dropdown_handler = Script.inject_model_dropdown_handler()
+            Script.is_dropdown_handler_injected = True
+            logger.debug("injected handler for model dropdown")
 
         # strip scripts that aren't yet supported and warn user
         packed_script_args: List[dict] = []  # list of api formatted per-script argument objects
