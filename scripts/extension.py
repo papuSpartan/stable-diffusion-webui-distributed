@@ -39,7 +39,7 @@ class Script(scripts.Script):
 
     is_img2img = True
     is_txt2img = True
-    alwayson = False
+    alwayson = True
     master_start = None
     runs_since_init = 0
     name = "distributed"
@@ -69,8 +69,7 @@ class Script(scripts.Script):
         return "Distribute"
 
     def show(self, is_img2img):
-        # return scripts.AlwaysVisible
-        return True
+        return scripts.AlwaysVisible
 
     def ui(self, is_img2img):
         extension_ui = UI(script=Script, world=Script.world)
@@ -259,8 +258,7 @@ class Script(scripts.Script):
 
     # p's type is
     # "modules.processing.StableDiffusionProcessingTxt2Img"
-    # runs every time the generate button is hit
-    def run(self, p, *args):
+    def before_process(self, p, *args):
         # TODO cleanup mechanism for handlers when extension is disabled
         current_thread().name = "distributed_main"
         Script.initialize(initial_payload=p)
@@ -396,12 +394,14 @@ class Script(scripts.Script):
             processed.all_negative_prompts = []
             processed.infotexts = []
             processed.prompt = None
-        else:
-            processed = processing.process_images(p)
 
-        Script.add_to_gallery(processed, p)
         Script.runs_since_init += 1
-        return processed
+        return
+
+    @staticmethod
+    def postprocess(p, processed, *args):
+        Script.add_to_gallery(p=p, processed=processed)
+        return
 
     @staticmethod
     def signal_handler(sig, frame):
