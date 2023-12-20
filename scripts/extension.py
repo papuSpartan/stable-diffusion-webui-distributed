@@ -44,7 +44,6 @@ class Script(scripts.Script):
     runs_since_init = 0
     name = "distributed"
     is_dropdown_handler_injected = False
-    original_dropdown_handler: Callable = None
 
     if verify_remotes is False:
         logger.warning(f"You have chosen to forego the verification of worker TLS certificates")
@@ -229,45 +228,20 @@ class Script(scripts.Script):
 
         try:
             Script.world.initialize(batch_size)
+            Script.world.inject_model_dropdown_handler()
             logger.debug(f"World initialized!")
         except WorldAlreadyInitialized:
             Script.world.update_world(total_batch_size=batch_size)
 
-
-    @staticmethod
-    def inject_model_dropdown_handler() -> Callable:
-        # get original handler for model dropdown
-        model_dropdown = opts.data_labels.get('sd_model_checkpoint')
-        original_handler = model_dropdown.onchange
-
-        # new handler encompassing functionality of the original handler plus the function of syncing remote workers
-        def on_model_dropdown():
-            for worker in Script.world.get_workers():
-                if worker.master:
-                    continue
-
-                Thread(
-                    target=worker.load_options,
-                    args=(opts.sd_model_checkpoint,),
-                    name=f"{worker.label}_on_dropdown_model_load").start()
-
-            original_handler()  # load weights locally as usual using the original handler
-
-        model_dropdown.onchange = on_model_dropdown
-        return original_handler
-
     # p's type is
     # "modules.processing.StableDiffusionProcessingTxt2Img"
     def before_process(self, p, *args):
-        # TODO cleanup mechanism for handlers when extension is disabled
+        if not self.world.enabled:
+            logger.debug("extension is disabled")
+            return
+
         current_thread().name = "distributed_main"
         Script.initialize(initial_payload=p)
-
-        # reduce delays by loading weights on remotes as soon as they are selected from the local models dropdown
-        if not Script.is_dropdown_handler_injected:
-            Script.original_model_dropdown_handler = Script.inject_model_dropdown_handler()
-            Script.is_dropdown_handler_injected = True
-            logger.debug("injected handler for model dropdown")
 
         # strip scripts that aren't yet supported and warn user
         packed_script_args: List[dict] = []  # list of api formatted per-script argument objects
@@ -400,8 +374,10 @@ class Script(scripts.Script):
 
     @staticmethod
     def postprocess(p, processed, *args):
-        Script.add_to_gallery(p=p, processed=processed)
-        return
+        if not Script.world.enabled:
+            return
+        else:
+            Script.add_to_gallery(p=p, processed=processed)
 
     @staticmethod
     def signal_handler(sig, frame):

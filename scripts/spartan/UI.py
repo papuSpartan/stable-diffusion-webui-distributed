@@ -6,6 +6,7 @@ import gradio
 from .shared import logger, log_level, gui_handler
 from .Worker import Worker, State
 from modules.shared import state as webui_state
+from modules.shared import opts
 from typing import List
 from threading import Thread
 
@@ -18,6 +19,7 @@ class UI:
     def __init__(self, script, world):
         self.script = script
         self.world = world
+        self.original_model_dropdown_handler = opts.data_labels.get('sd_model_checkpoint').onchange
 
     # handlers
     @staticmethod
@@ -181,6 +183,16 @@ class UI:
     def main_toggle_btn(self, toggle):
         self.world.enabled = not self.world.enabled
         self.world.save_config()
+
+        # restore vanilla sdwui handler for model dropdown if extension is disabled or inject if otherwise
+        if not self.world.enabled:
+            model_dropdown = opts.data_labels.get('sd_model_checkpoint')
+            if self.original_model_dropdown_handler is not None:
+                model_dropdown.onchange = self.original_model_dropdown_handler
+            self.world.is_dropdown_handler_injected = False
+        else:
+            self.world.inject_model_dropdown_handler()
+
     # end handlers
 
     def create_ui(self):

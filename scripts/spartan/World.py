@@ -82,6 +82,7 @@ class World:
         self.initial_payload = copy.copy(initial_payload)
         self.thin_client_mode = False
         self.enabled = True
+        self.is_dropdown_handler_injected = False
 
     def __getitem__(self, label: str) -> Worker:
         for worker in self._workers:
@@ -624,3 +625,30 @@ class World:
                     msg = f"worker '{worker.label}' is unreachable"
                     logger.info(msg)
                     gradio.Warning("Distributed: "+msg)
+
+    def inject_model_dropdown_handler(self):
+        if self.is_dropdown_handler_injected:
+            logger.debug("handler is already injected")
+            return
+
+        # get original handler for model dropdown
+        model_dropdown = shared.opts.data_labels.get('sd_model_checkpoint')
+        original_handler = model_dropdown.onchange
+
+        # new handler encompassing functionality of the original handler plus the function of syncing remote workers
+        def on_model_dropdown():
+            for worker in self.get_workers():
+                if worker.master:
+                    continue
+
+                Thread(
+                    target=worker.load_options,
+                    args=(shared.opts.sd_model_checkpoint,),
+                    name=f"{worker.label}_on_dropdown_model_load").start()
+
+            original_handler()  # load weights locally as usual using the original handler
+
+        model_dropdown.onchange = on_model_dropdown
+        shared.is_dropdown_handler_injected = True
+        logger.debug("injected handler for model dropdown")
+        return  # the original handler is cached by UI()
