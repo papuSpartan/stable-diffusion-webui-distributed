@@ -39,3 +39,4 @@ class Config_Model(BaseModel):
         description='the payload used when benchmarking a node'
     )
     job_timeout: Optional[int] = Field(default=3)
+    enabled: Optional[bool] = Field(description="Whether the extension as a whole should be active or disabled", default=True)

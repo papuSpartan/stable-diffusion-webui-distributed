@@ -178,11 +178,19 @@ class UI:
             worker.session.auth = (user, password)
         self.world.save_config()
 
+    def main_toggle_btn(self, toggle):
+        self.world.enabled = not self.world.enabled
+        self.world.save_config()
     # end handlers
+
     def create_ui(self):
         """creates the extension UI within a gradio.Box() and returns it"""
         with gradio.Blocks(variant='compact') as root:  # Group() and Box() remove spacing
             with gradio.Accordion(label='Distributed', open=False):
+                # https://github.com/AUTOMATIC1111/stable-diffusion-webui/issues/6109#issuecomment-1403315784
+                main_toggle = gradio.Checkbox(elem_id='enable', label='Enable', value=lambda: self.world.config()['enabled'])  # main on/off ext. toggle
+                main_toggle.input(self.main_toggle_btn)
+
                 with gradio.Tab('Status') as status_tab:
                     status = gradio.Textbox(elem_id='status', show_label=False, interactive=False)
                     status.placeholder = 'Refresh!'

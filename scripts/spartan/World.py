@@ -81,6 +81,7 @@ class World:
         self.verify_remotes = verify_remotes
         self.initial_payload = copy.copy(initial_payload)
         self.thin_client_mode = False
+        self.enabled = True
 
     def __getitem__(self, label: str) -> Worker:
         for worker in self._workers:
@@ -568,7 +569,8 @@ class World:
         config = Config_Model(
             workers=[{worker.label: worker.model.dict()} for worker in self._workers],
             benchmark_payload=sh.benchmark_payload,
-            job_timeout=self.job_timeout
+            job_timeout=self.job_timeout,
+            enabled=self.enabled
         )
 
         with open(self.config_path, 'w+') as config_file:
