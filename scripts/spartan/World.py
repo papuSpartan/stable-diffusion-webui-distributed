@@ -627,6 +627,8 @@ class World:
                     gradio.Warning("Distributed: "+msg)
 
     def inject_model_dropdown_handler(self):
+        if self.config()["enabled"] is False: # TODO avoid access from config()
+            return
         if self.is_dropdown_handler_injected:
             logger.debug("handler is already injected")
             return
@@ -649,6 +651,6 @@ class World:
             original_handler()  # load weights locally as usual using the original handler
 
         model_dropdown.onchange = on_model_dropdown
-        shared.is_dropdown_handler_injected = True
+        self.is_dropdown_handler_injected = True
         logger.debug("injected handler for model dropdown")
         return  # the original handler is cached by UI()

@@ -74,6 +74,9 @@ class Script(scripts.Script):
         extension_ui = UI(script=Script, world=Script.world)
         root, api_exposed = extension_ui.create_ui()
 
+        # The first injection of handler for the models dropdown(sd_model_checkpoint) which is often present
+        # in the quick-settings bar of a user. Helps ensure model swaps propagate to all nodes ASAP.
+        Script.world.inject_model_dropdown_handler()
         # return some components that should be exposed to the api
         return api_exposed
 
@@ -228,7 +231,6 @@ class Script(scripts.Script):
 
         try:
             Script.world.initialize(batch_size)
-            Script.world.inject_model_dropdown_handler()
             logger.debug(f"World initialized!")
         except WorldAlreadyInitialized:
             Script.world.update_world(total_batch_size=batch_size)
