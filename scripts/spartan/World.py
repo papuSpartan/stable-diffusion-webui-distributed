@@ -640,7 +640,7 @@ class World:
         # new handler encompassing functionality of the original handler plus the function of syncing remote workers
         def on_model_dropdown():
             for worker in self.get_workers():
-                if worker.master:
+                if worker.master or worker.model_override is not None:
                     continue
 
                 Thread(

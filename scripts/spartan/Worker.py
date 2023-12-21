@@ -303,11 +303,7 @@ class Worker:
                                      f"{memory_response}")
 
             if sync_options is True:
-                model = option_payload['sd_model_checkpoint']
-                if self.model_override is not None:
-                    model = self.model_override
-
-                self.load_options(model=model, vae=option_payload['sd_vae'])
+                self.load_options(model=option_payload['sd_model_checkpoint'], vae=option_payload['sd_vae'])
                 # TODO api returns 200 even if it fails to successfully set the checkpoint so we will have to make a
                 #  second GET to see if everything loaded...
 
@@ -624,6 +620,9 @@ class Worker:
             return None
 
     def load_options(self, model, vae=None):
+        if self.model_override is not None:
+            model = self.model_override
+
         model_name = re.sub(r'\s?\[[^]]*]$', '', model)
         payload = {
             "sd_model_checkpoint": model_name
