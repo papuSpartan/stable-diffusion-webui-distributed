@@ -198,9 +198,7 @@ class Script(scripts.Script):
                 processed_inject_image(image=image, info_index=i, response=job.worker.response)
 
         if donor_worker is None:
-            msg = "couldn't collect any responses, the extension will have no effect"
-            logger.critical(msg)
-            gradio.Warning("Distributed: "+msg)
+            logger.critical("couldn't collect any responses, the extension will have no effect")
             return
 
         # generate and inject grid
