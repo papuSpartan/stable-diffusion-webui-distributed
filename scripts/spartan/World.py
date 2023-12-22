@@ -196,7 +196,8 @@ class World:
         """
 
         unbenched_workers = []
-        benchmark_threads = []
+        benchmark_threads: List[Thread] = []
+        sync_threads: List[Thread] = []
 
         def benchmark_wrapped(worker):
             bench_func = worker.benchmark if not worker.master else self.benchmark_master
@@ -216,6 +217,17 @@ class World:
                     unbenched_workers.append(worker)
                 else:
                     worker.benchmarked = True
+
+        # have every unbenched worker load the same weights before the benchmark
+        for worker in unbenched_workers:
+            if worker.master:
+                continue
+
+            sync_thread = Thread(target=worker.load_options, args=(shared.opts.sd_model_checkpoint, shared.opts.sd_vae))
+            sync_threads.append(sync_thread)
+            sync_thread.start()
+        for thread in sync_threads:
+            thread.join()
 
         # benchmark those that haven't been
         for worker in unbenched_workers:

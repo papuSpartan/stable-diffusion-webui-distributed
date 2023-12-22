@@ -342,27 +342,29 @@ class Worker:
 
                 compatible_scripts = {}
                 incompatible_scripts = []
-                for script in self.supported_scripts[mode]:
-                    match = False
-                    for local_script in payload['alwayson_scripts']:
-                        if str.lower(local_script) == script:
-                            compatible_scripts[local_script] = payload['alwayson_scripts'][local_script]
-                            match = True
-                            break
+                alwayson_scripts = payload.get('alwayson_scripts', None)
+                if alwayson_scripts is not None:  # key may not always exist, benchmarking being one example
+                    for script in self.supported_scripts[mode]:
+                        match = False
+                        for local_script in alwayson_scripts:
+                            if str.lower(local_script) == script:
+                                compatible_scripts[local_script] = alwayson_scripts[local_script]
+                                match = True
+                                break
 
-                    if not match:
-                        incompatible_scripts.append(script)
+                        if not match:
+                            incompatible_scripts.append(script)
 
-                message = "local script(s): "
-                for script in range(0, len(incompatible_scripts)):
-                    message += f"\[{incompatible_scripts[script]}]"
-                    if script < len(incompatible_scripts) - 1:
-                        message += ', '
-                message += f" seem to be unsupported by worker '{self.label}'\n"
-                message += f"these may simply need to be installed on '{self.label}' for full functionality"
-                logger.warning(message)
+                    message = "local script(s): "
+                    for script in range(0, len(incompatible_scripts)):
+                        message += f"\[{incompatible_scripts[script]}]"
+                        if script < len(incompatible_scripts) - 1:
+                            message += ', '
+                    message += f" seem to be unsupported by worker '{self.label}'\n"
+                    message += f"these may simply need to be installed on '{self.label}' for full functionality"
+                    logger.warning(message)
 
-                payload['alwayson_scripts'] = compatible_scripts
+                    payload['alwayson_scripts'] = compatible_scripts
 
                 # if an image mask is present
                 image_mask = payload.get('image_mask', None)
