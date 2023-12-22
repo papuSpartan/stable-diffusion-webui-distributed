@@ -161,11 +161,11 @@ class UI:
 
         if model == "None":
             worker.model_override = None
+            model = opts.sd_model_checkpoint
         else:
             worker.model_override = model
 
-            # set model on remote early
-            Thread(target=worker.load_options, args=(model,)).start()
+        Thread(target=worker.load_options, args=(model,)).start()
 
     def update_credentials_btn(self, api_auth_toggle, user, password, worker_label):
         worker = self.world[worker_label]
