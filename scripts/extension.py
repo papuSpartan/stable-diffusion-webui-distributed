@@ -140,6 +140,7 @@ class Script(scripts.Script):
             processed.infotexts.append(info_text)
 
             # automatically save received image to local disk if desired
+            # TODO handle index out of bounds when missing seed or prompt such as with controlnet when saving
             if cmd_opts.distributed_remotes_autosave:
                 save_image(
                     image=image,

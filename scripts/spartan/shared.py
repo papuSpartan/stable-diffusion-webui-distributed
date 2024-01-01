@@ -1,5 +1,6 @@
 import logging
 from logging import Handler
+from logging.handlers import RotatingFileHandler
 from inspect import getsourcefile
 from typing import Union
 from rich.logging import RichHandler
@@ -22,7 +23,7 @@ rich_handler = RichHandler(
 logger.propagate = False  # prevent log duplication by webui since it now uses the logging module
 logger.setLevel(log_level)
 log_path = extension_path.joinpath('distributed.log')
-file_handler = logging.FileHandler(log_path)
+file_handler = RotatingFileHandler(filename=log_path, maxBytes=10_000_000, backupCount=1)
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 file_handler.formatter = formatter
 
