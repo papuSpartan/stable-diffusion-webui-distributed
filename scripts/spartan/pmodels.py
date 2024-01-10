@@ -31,6 +31,7 @@ class Worker_Model(BaseModel):
     state: Optional[Any] = Field(default=1, description="The last known state of this worker")
     user: Optional[str] = Field(description="The username to be used when authenticating with this worker")
     password: Optional[str] = Field(description="The password to be used when authenticating with this worker")
+    pixel_cap: Optional[int] = Field(default=-1, description="Max amount of pixels to allow one worker to handle at the same time. -1 means there is no limit")
 
 class Config_Model(BaseModel):
     workers: List[Dict[str, Worker_Model]]

@@ -88,7 +88,7 @@ class Worker:
 
     def __init__(self, address: Union[str, None] = None, port: int = 7860, label: Union[str, None] = None,
                  verify_remotes: bool = True, master: bool = False, tls: bool = False, state: State = State.IDLE,
-                 avg_ipm: float = 1.0, eta_percent_error=None, user: str = None, password: str = None
+                 avg_ipm: float = 1.0, eta_percent_error=None, user: str = None, password: str = None, pixel_cap: int = None
                  ):
 
         if eta_percent_error is None:
@@ -111,6 +111,7 @@ class Worker:
         self.response = None
         self.queried = False
         self.benchmarked = False
+        self.pixel_cap = pixel_cap  # ex. limit, 2 512x512 images at once: (2*(512*512)) = 524288 px
 
         # master specific setup
         if master is True:
@@ -215,10 +216,18 @@ class Worker:
         eta = self.batch_eta(payload=pseudo_payload, quiet=True)
         return eta
 
-    def batch_eta(self, payload: dict, quiet: bool = False) -> float:
-        """estimate how long it will take to generate <batch_size> images on a worker in seconds"""
+    def batch_eta(self, payload: dict, quiet: bool = False, batch_size: int = None) -> float:
+        """
+            estimate how long it will take to generate <batch_size> images on a worker in seconds
+
+            Args:
+                payload: Sdwui api formatted payload
+                quiet: Whether to print error correction information
+                batch_size: Overrides the batch_size parameter of the payload
+        """
+
         steps = payload['steps']
-        num_images = payload['batch_size']
+        num_images = payload['batch_size'] if batch_size is None else batch_size
 
         # if worker has not yet been benchmarked then
         eta = (num_images / self.avg_ipm) * 60
@@ -611,9 +620,9 @@ class Worker:
             self.loaded_model = None
             self.loaded_vae = None
 
-    def available_models(self) -> Union[List[str], None]:
-        if self.state == State.UNAVAILABLE or self.state == State.DISABLED:
-            return None
+    def available_models(self) -> [List[str]]:
+        if self.state == State.UNAVAILABLE or self.state == State.DISABLED or self.master:
+            return []
 
         url = self.full_url('sd-models')
         try:
@@ -626,15 +635,18 @@ class Worker:
                 logger.error(f"request to {url} returned {response.status_code}")
                 if response.status_code == 404:
                     logger.error(f"did you enable --api for '{self.label}'?")
-                return None
+                return []
 
             titles = [model['title'] for model in response.json()]
             return titles
         except requests.RequestException:
             self.mark_unreachable()
-            return None
+            return []
 
     def load_options(self, model, vae=None):
+        if self.master:
+            return
+
         if self.model_override is not None:
             model = self.model_override
 

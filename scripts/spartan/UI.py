@@ -91,68 +91,60 @@ class UI:
 
         # determine what state to save
         # if updating a pre-existing worker then grab its current state
-        state = State.IDLE
-        if disabled:
-            state = State.DISABLED
-        else:
-            original = self.world[label]
-            if original is not None:
-                state = original.state if original.state != State.DISABLED else State.IDLE
+        if not label == 'master':
+            state = State.IDLE
+            if disabled:
+                state = State.DISABLED
+            else:
+                original = self.world[label]
+                if original is not None:
+                    state = original.state if original.state != State.DISABLED else State.IDLE
 
-        self.world.add_worker(
-            label=label,
-            address=address,
-            port=port,
-            tls=tls,
-            state=state
-        )
-        self.world.save_config()
+            self.world.add_worker(
+                label=label,
+                address=address,
+                port=port,
+                tls=tls,
+                state=state
+            )
+            self.world.save_config()
 
         # visibly update which workers can be selected
-        labels = [worker.label for worker in self.selectable_remote_workers()]
+        labels = sorted([worker.label for worker in self.world._workers])
         return gradio.Dropdown.update(choices=labels)
-
-    def selectable_remote_workers(self) -> List[Worker]:
-        """gets a list of all registered remote workers"""
-        remote_workers = []
-
-        for worker in self.world._workers:
-            if worker.master:
-                continue
-            remote_workers.append(worker)
-        remote_workers = sorted(remote_workers, key=lambda x: x.label)
-
-        return remote_workers
 
     def remove_worker_btn(self, worker_label):
         """removes, from disk and memory, whatever worker is selected on the worker config tab"""
-        # remove worker from memory
-        for worker in self.world._workers:
-            if worker.label == worker_label:
-                self.world._workers.remove(worker)
 
-        # remove worker from disk
-        self.world.save_config()
+        if not worker_label == 'master':
+            # remove worker from memory
+            for worker in self.world._workers:
+                if worker.label == worker_label:
+                    self.world._workers.remove(worker)
+
+            # remove worker from disk
+            self.world.save_config()
 
         # visibly update which workers can be selected
-        labels = [x.label for x in self.selectable_remote_workers()]
+        labels = sorted([worker.label for worker in self.world._workers])
         return gradio.Dropdown.update(choices=labels)
 
     def populate_worker_config_from_selection(self, selection):
         """populates the ui components on the worker config tab with the current values of the selected worker"""
-        avail_models = None
         selected_worker = self.world[selection]
-
-        avail_models = selected_worker.available_models()
-        if avail_models is not None:
-            avail_models.append('None')  # for disabling override
+        available_models = selected_worker.available_models()
+        if not selected_worker.master:
+            if len(available_models) > 0:
+                available_models.append('None')  # for disabling override
+        else:
+            available_models.append('N/A')
 
         return [
             gradio.Textbox.update(value=selected_worker.address),
             gradio.Textbox.update(value=selected_worker.port),
             gradio.Checkbox.update(value=selected_worker.tls),
-            gradio.Dropdown.update(choices=avail_models),
-            gradio.Checkbox.update(value=True if selected_worker.state == State.DISABLED else False)
+            gradio.Dropdown.update(choices=available_models),
+            gradio.Checkbox.update(value=selected_worker.state == State.DISABLED)
         ]
 
     def override_worker_model(self, model, worker_label):
@@ -169,6 +161,8 @@ class UI:
 
     def update_credentials_btn(self, api_auth_toggle, user, password, worker_label):
         worker = self.world[worker_label]
+        if worker.master:
+            return
 
         if api_auth_toggle is False:
             worker.user = None
@@ -258,7 +252,7 @@ class UI:
 
                 with gradio.Tab('Worker Config'):
                     worker_select_dropdown = gradio.Dropdown(
-                        [x.label for x in self.selectable_remote_workers()],
+                        sorted([worker.label for worker in self.world._workers]),
                         info='Select a pre-existing worker or enter a label for a new one',
                         label='Label',
                         allow_custom_value=True
@@ -276,6 +270,14 @@ class UI:
                         model_override_dropdown = gradio.Dropdown(label='Model override')
                         model_override_dropdown.select(self.override_worker_model,
                                                        inputs=[model_override_dropdown, worker_select_dropdown])
+
+                        def pixel_cap_handler(selected_worker, pixel_cap):
+                            selected = self.world[selected_worker]
+                            selected.pixel_cap = pixel_cap
+                            self.world.save_config()
+
+                        pixel_cap = gradio.Number(label='Pixel cap')
+                        pixel_cap.input(pixel_cap_handler, inputs=[worker_select_dropdown, pixel_cap])
 
                         # API authentication
                         worker_api_auth_cbx = gradio.Checkbox(label='API Authentication')

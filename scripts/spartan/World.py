@@ -57,6 +57,19 @@ class Job:
 
         return prefix + suffix
 
+    def add_work(self, payload: dict, batch_size: int = 1):
+        if self.worker.pixel_cap == -1:
+            self.batch_size += batch_size
+            return True
+
+        pixels = (self.batch_size + batch_size) * (payload['width'] * payload['height'])
+        if pixels <= self.worker.pixel_cap:
+            self.batch_size += batch_size
+            return True
+        else:
+            logger.debug(f"worker {self.worker.label} hit pixel cap ({pixels} > cap: {self.worker.pixel_cap})")
+            return False
+
 
 class World:
     """
@@ -324,7 +337,7 @@ class World:
 
         return sorted(self.realtime_jobs(), key=lambda job: job.worker.avg_ipm, reverse=True)[0]
 
-    def job_stall(self, worker: Worker, payload: dict) -> float:
+    def job_stall(self, worker: Worker, payload: dict, batch_size: int = None) -> float:
         """
             We assume that the passed worker will do an equal portion of the total request.
             Estimate how much time the user would have to wait for the images to show up.
@@ -335,7 +348,7 @@ class World:
         if worker == fastest_worker:
             return 0
 
-        lag = worker.batch_eta(payload=payload, quiet=True) - fastest_worker.batch_eta(payload=payload, quiet=True)
+        lag = worker.batch_eta(payload=payload, quiet=True, batch_size=batch_size) - fastest_worker.batch_eta(payload=payload, quiet=True, batch_size=batch_size)
 
         return lag
 
@@ -410,7 +423,6 @@ class World:
         deferred_images = 0  # the number of images that were not assigned to a worker due to the worker being too slow
         # the maximum amount of images that a "slow" worker can produce in the slack space where other nodes are working
         # max_compensation = 4 currently unused
-        images_per_job = None
         images_checked = 0
         for job in self.jobs:
 
@@ -436,8 +448,32 @@ class World:
         if deferred_images > 0:
             realtime_jobs = self.realtime_jobs()
             images_per_job = deferred_images // len(realtime_jobs)
-            for job in realtime_jobs:
-                job.batch_size = job.batch_size + images_per_job
+            saturated_jobs = []
+
+            job_no = 0
+            while deferred_images > 0:
+                if len(saturated_jobs) == len(self.jobs):
+                    logger.critical(f"all workers saturated, cannot distribute {deferred_images} remaining deferred image(s)")
+                    break
+
+                # helps in cases where a worker is only barely considered realtime
+                job = self.jobs[job_no]
+                stall_time = self.job_stall(
+                    worker=job.worker,
+                    payload=payload,
+                    batch_size=(job.batch_size + images_per_job)
+                )
+
+                if stall_time < self.job_timeout:
+                    if job.add_work(payload, batch_size=images_per_job):
+                        deferred_images -= images_per_job
+                    else:
+                        saturated_jobs.append(job)
+
+                if job_no < len(self.jobs) - 1:
+                    job_no += 1
+                else:
+                    job_no = 0
 
         #######################
         # remainder handling  #
@@ -451,12 +487,27 @@ class World:
             realtime_jobs = self.realtime_jobs()
             realtime_jobs.sort(key=lambda x: x.batch_size)
             # round-robin distribute the remaining images
+            saturated_jobs = []
             while remainder_images >= 1:
+                if len(saturated_jobs) >= len(self.jobs):
+                    logger.critical("all workers saturated, cannot fully distribute remainder of request")
+                    break
+
                 for job in realtime_jobs:
                     if remainder_images < 1:
                         break
-                    job.batch_size += 1
-                    remainder_images -= 1
+
+                    if job.add_work(payload):
+                        remainder_images -= 1
+                    else:
+                        saturated_jobs.append(job)
+                        continue
+
+            # prevents case where ex: batch_size = 2, world size = 3 the first two workers are given work
+            # but the last worker gets ignored.
+            for job in self.jobs:
+                if job.batch_size == 0:
+                    job.complementary = True
 
         #####################################
         # complementary worker distribution #
@@ -469,22 +520,26 @@ class World:
             if job.complementary is False:
                 continue
 
-            slowest_active_worker = self.slowest_realtime_job().worker
-            slack_time = slowest_active_worker.batch_eta(payload=payload)
+            slowest_active_worker = self.fastest_realtime_job().worker
+            for j in self.jobs:
+                if j.worker.label == slowest_active_worker.label:
+                    slack_time = slowest_active_worker.batch_eta(payload=payload, batch_size=j.batch_size) + self.job_timeout
             logger.debug(f"There's {slack_time:.2f}s of slack time available for worker '{job.worker.label}'")
 
-            # in the case that this worker is now taking on what others workers would have been (if they were real-time)
-            # this means that there will be more slack time for complementary nodes
-            if images_per_job is not None:
-                slack_time = slack_time + ((slack_time / payload['batch_size']) * images_per_job)
-
             # see how long it would take to produce only 1 image on this complementary worker
-            fake_payload = copy.copy(payload)
-            fake_payload['batch_size'] = 1
-            secs_per_batch_image = job.worker.batch_eta(payload=fake_payload)
+            secs_per_batch_image = job.worker.batch_eta(payload=payload, batch_size=1)
             num_images_compensate = int(slack_time / secs_per_batch_image)
+            logger.debug(
+                f"worker '{job.worker.label}':\n"
+                f"{num_images_compensate} complementary image(s) = {slack_time:.2f}s slack"
+                f"/ {secs_per_batch_image:.2f}s per requested image"
+            )
 
-            job.batch_size = num_images_compensate
+            if not job.add_work(payload, batch_size=num_images_compensate):
+                # stay below pixel cap ceiling
+                request_img_size = payload['width'] * payload['height']
+                max_images = job.worker.pixel_cap // request_img_size
+                job.add_work(payload,batch_size=max_images)
 
         distro_summary = "Job distribution:\n"
         iterations = payload['n_iter']

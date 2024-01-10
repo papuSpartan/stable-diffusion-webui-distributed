@@ -93,16 +93,19 @@ class Script(scripts.Script):
             seed = None
             subseed = None
             negative_prompt = None
+            pos_prompt = None
 
             try:
                 if num_response_images > 1:
                     seed = image_info_post['all_seeds'][info_index]
                     subseed = image_info_post['all_subseeds'][info_index]
                     negative_prompt = image_info_post['all_negative_prompts'][info_index]
+                    pos_prompt = image_info_post['all_prompts'][info_index]
                 else:
                     seed = image_info_post['seed']
                     subseed = image_info_post['subseed']
                     negative_prompt = image_info_post['negative_prompt']
+                    pos_prompt = image_info_post['prompt']
             except IndexError:
                 # like with controlnet masks, there isn't always full post-gen info, so we use the first images'
                 logger.debug(f"Image at index {i} for '{job.worker.label}' was missing some post-generation data")
@@ -112,7 +115,7 @@ class Script(scripts.Script):
             processed.all_seeds.append(seed)
             processed.all_subseeds.append(subseed)
             processed.all_negative_prompts.append(negative_prompt)
-            processed.all_prompts.append(image_params["prompt"])
+            processed.all_prompts.append(pos_prompt)
             processed.images.append(image)  # actual received image
 
             # generate info-text string
@@ -140,14 +143,13 @@ class Script(scripts.Script):
             processed.infotexts.append(info_text)
 
             # automatically save received image to local disk if desired
-            # TODO handle index out of bounds when missing seed or prompt such as with controlnet when saving
             if cmd_opts.distributed_remotes_autosave:
                 save_image(
                     image=image,
                     path=p.outpath_samples if save_path_override is None else save_path_override,
                     basename="",
-                    seed=image_info_post['all_seeds'][i],
-                    prompt=image_info_post['all_prompts'][i],
+                    seed=seed,
+                    prompt=pos_prompt,
                     info=info_text,
                     extension=opts.samples_format
                 )
@@ -377,7 +379,7 @@ class Script(scripts.Script):
     def postprocess(p, processed, *args):
         if not Script.world.enabled:
             return
-        else:
+        elif len(processed.images) >= 1 and Script.master_start is not None:
             Script.add_to_gallery(p=p, processed=processed)
 
     @staticmethod
