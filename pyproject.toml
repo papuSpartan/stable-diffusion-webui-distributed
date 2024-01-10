@@ -1,0 +1,17 @@
+[project]
+name = 'distributed'
+version = '2'
+[project.optional-dependencies]
+lint = [
+    "pydocstyle",
+    "pydocstyle[toml]"
+]
+
+# https://pylint.pycqa.org/en/latest/user_guide/configuration/all-options.html#all-options
+[tool.pylint]
+disable = 'import-error'
+
+# requires pydocstyle[toml] to autodetect this file https://www.pydocstyle.org/en/stable/usage.html#configuration-files
+[tool.pydocstyle]
+convention = 'google'
+# add-ignore = "D100"
