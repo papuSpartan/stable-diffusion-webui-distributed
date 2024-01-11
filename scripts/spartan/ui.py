@@ -1,14 +1,12 @@
 import os
 import subprocess
 from pathlib import Path
-import gradio
-
-from .shared import logger, log_level, gui_handler
-from .Worker import Worker, State
-from modules.shared import state as webui_state
-from modules.shared import opts
-from typing import List
 from threading import Thread
+import gradio
+from modules.shared import opts
+from modules.shared import state as webui_state
+from .shared import logger, LOG_LEVEL, gui_handler
+from .worker import State
 
 worker_select_dropdown = None
 
@@ -174,7 +172,7 @@ class UI:
             worker.session.auth = (user, password)
         self.world.save_config()
 
-    def main_toggle_btn(self, toggle):
+    def main_toggle_btn(self):
         self.world.enabled = not self.world.enabled
         self.world.save_config()
 
@@ -245,7 +243,7 @@ class UI:
                         redo_benchmarks_btn.style(full_width=False)
                         redo_benchmarks_btn.click(self.benchmark_btn, inputs=[], outputs=[])
 
-                    if log_level == 'DEBUG':
+                    if LOG_LEVEL == 'DEBUG':
                         clear_queue_btn = gradio.Button(value='Clear local webui queue', variant='stop')
                         clear_queue_btn.style(full_width=False)
                         clear_queue_btn.click(self.clear_queue_btn)

@@ -3,28 +3,28 @@ https://github.com/papuSpartan/stable-diffusion-webui-distributed
 """
 
 import base64
+import copy
 import io
 import json
 import re
-from modules import scripts
-from modules import processing
-from threading import Thread, current_thread
-from PIL import Image
-from typing import List, Callable
-import urllib3
-import copy
-from modules.images import save_image
-from modules.shared import opts, cmd_opts
-from modules.shared import state as webui_state
-import time
-from scripts.spartan.World import World, WorldAlreadyInitialized
-from scripts.spartan.UI import UI
-from scripts.spartan.shared import logger
-from scripts.spartan.control_net import pack_control_net
-from modules.processing import fix_seed, Processed
 import signal
 import sys
+import time
+from threading import Thread, current_thread
+from typing import List
 import gradio
+import urllib3
+from PIL import Image
+from modules import processing
+from modules import scripts
+from modules.images import save_image
+from modules.processing import fix_seed, Processed
+from modules.shared import opts, cmd_opts
+from modules.shared import state as webui_state
+from scripts.spartan.control_net import pack_control_net
+from scripts.spartan.shared import logger
+from scripts.spartan.ui import UI
+from scripts.spartan.world import World, WorldAlreadyInitialized
 
 old_sigint_handler = signal.getsignal(signal.SIGINT)
 old_sigterm_handler = signal.getsignal(signal.SIGTERM)
@@ -35,7 +35,7 @@ old_sigterm_handler = signal.getsignal(signal.SIGTERM)
 class Script(scripts.Script):
     worker_threads: List[Thread] = []
     # Whether to verify worker certificates. Can be useful if your remotes are self-signed.
-    verify_remotes = False if cmd_opts.distributed_skip_verify_remotes else True
+    verify_remotes = not cmd_opts.distributed_skip_verify_remotes
 
     is_img2img = True
     is_txt2img = True
@@ -268,13 +268,13 @@ class Script(scripts.Script):
                 packed_script_args.append(pack_control_net(cn_units))
 
                 continue
-            else:
-                # other scripts to pack
-                args_script_pack = {title: {"args": []}}
-                for arg in p.script_args[script.args_from:script.args_to]:
-                    args_script_pack[title]["args"].append(arg)
-                packed_script_args.append(args_script_pack)
-                # https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111/issues/12#issuecomment-1480382514
+
+            # other scripts to pack
+            args_script_pack = {title: {"args": []}}
+            for arg in p.script_args[script.args_from:script.args_to]:
+                args_script_pack[title]["args"].append(arg)
+            packed_script_args.append(args_script_pack)
+            # https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111/issues/12#issuecomment-1480382514
 
         # encapsulating the request object within a txt2imgreq object is deprecated and no longer works
         # see test/basic_features/txt2img_test.py for an example
@@ -379,7 +379,8 @@ class Script(scripts.Script):
     def postprocess(p, processed, *args):
         if not Script.world.enabled:
             return
-        elif len(processed.images) >= 1 and Script.master_start is not None:
+
+        if len(processed.images) >= 1 and Script.master_start is not None:
             Script.add_to_gallery(p=p, processed=processed)
 
     @staticmethod

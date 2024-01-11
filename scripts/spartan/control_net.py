@@ -1,6 +1,6 @@
-from modules.api.api import encode_pil_to_base64
-from PIL import Image
 import copy
+from PIL import Image
+from modules.api.api import encode_pil_to_base64
 from scripts.spartan.shared import logger
 
 

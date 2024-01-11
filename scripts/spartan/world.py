@@ -9,15 +9,15 @@ import copy
 import json
 import os
 import time
-from typing import List, Dict, Union
 from threading import Thread
+from typing import List
 import gradio
-from modules.processing import process_images, StableDiffusionProcessingTxt2Img
 import modules.shared as shared
-from .Worker import Worker, State
-from .shared import logger, warmup_samples, extension_path
-from .pmodels import Config_Model, Benchmark_Payload
+from modules.processing import process_images, StableDiffusionProcessingTxt2Img
 from . import shared as sh
+from .pmodels import ConfigModel, Benchmark_Payload
+from .shared import logger, warmup_samples, extension_path
+from .worker import Worker, State
 
 
 class NotBenchmarked(Exception):
@@ -66,9 +66,8 @@ class Job:
         if pixels <= self.worker.pixel_cap:
             self.batch_size += batch_size
             return True
-        else:
-            logger.debug(f"worker {self.worker.label} hit pixel cap ({pixels} > cap: {self.worker.pixel_cap})")
-            return False
+        logger.debug(f"worker {self.worker.label} hit pixel cap ({pixels} > cap: {self.worker.pixel_cap})")
+        return False
 
 
 class World:
@@ -370,7 +369,7 @@ class World:
         master_bench_payload.do_not_save_samples = True
 
         # "warm up" due to initial generation lag
-        for i in range(warmup_samples):
+        for _ in range(warmup_samples):
             process_images(master_bench_payload)
 
         # get actual sample
@@ -610,7 +609,7 @@ class World:
             sh.benchmark_payload = Benchmark_Payload()
             return
 
-        config = Config_Model(**config_raw)
+        config = ConfigModel(**config_raw)
 
         # saves config schema to <extension>/distributed-config.schema.json
         # print(models.Config.schema_json())
@@ -634,7 +633,7 @@ class World:
         Saves the config file.
         """
 
-        config = Config_Model(
+        config = ConfigModel(
             workers=[{worker.label: worker.model.dict()} for worker in self._workers],
             benchmark_payload=sh.benchmark_payload,
             job_timeout=self.job_timeout,

@@ -1,18 +1,18 @@
 import logging
+from inspect import getsourcefile
 from logging import Handler
 from logging.handlers import RotatingFileHandler
-from inspect import getsourcefile
+from os.path import abspath
+from pathlib import Path
 from typing import Union
-from rich.logging import RichHandler
 from modules.shared import cmd_opts
 from pydantic import BaseModel, Field
-from os.path import abspath
+from rich.logging import RichHandler
 
-from pathlib import Path
 extension_path = Path(abspath(getsourcefile(lambda: 0))).parent.parent.parent
 
 # https://rich.readthedocs.io/en/stable/logging.html
-log_level = 'DEBUG' if cmd_opts.distributed_debug else 'INFO'
+LOG_LEVEL = 'DEBUG' if cmd_opts.distributed_debug else 'INFO'
 logger = logging.getLogger("distributed")
 rich_handler = RichHandler(
     rich_tracebacks=True,
@@ -21,7 +21,7 @@ rich_handler = RichHandler(
     keywords=["distributed", "Distributed", "worker", "Worker", "world", "World"]
 )
 logger.propagate = False  # prevent log duplication by webui since it now uses the logging module
-logger.setLevel(log_level)
+logger.setLevel(LOG_LEVEL)
 log_path = extension_path.joinpath('distributed.log')
 file_handler = RotatingFileHandler(filename=log_path, maxBytes=10_000_000, backupCount=1)
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')

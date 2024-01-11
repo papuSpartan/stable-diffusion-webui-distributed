@@ -1,19 +1,18 @@
-import io
-# import gradio
-import requests
-from typing import List, Tuple, Union
-import math
-import copy
-import time
-from threading import Thread
-from modules.shared import cmd_opts
-from enum import Enum
-import json
 import base64
+import copy
+import io
+import json
+import math
 import queue
-from modules.shared import state as master_state
-from modules.api.api import encode_pil_to_base64
 import re
+import time
+from enum import Enum
+from threading import Thread
+from typing import List, Union
+import requests
+from modules.api.api import encode_pil_to_base64
+from modules.shared import cmd_opts
+from modules.shared import state as master_state
 from . import shared as sh
 from .shared import logger, warmup_samples
 
@@ -438,8 +437,7 @@ class Worker:
                 result = response_queue.get()
                 if isinstance(result, Exception):
                     raise result
-                else:
-                    response = result
+                response = result
 
                 self.response = response.json()
                 if response.status_code != 200:
@@ -600,10 +598,7 @@ class Worker:
                 timeout=3,
                 verify=not self.verify_remotes
             )
-            if response.status_code == 200:
-                return True
-            else:
-                return False
+            return response.status_code == 200
 
         except requests.exceptions.ConnectionError:
             return False
