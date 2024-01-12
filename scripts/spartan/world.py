@@ -693,7 +693,7 @@ class World:
                     gradio.Warning("Distributed: "+msg)
 
     def inject_model_dropdown_handler(self):
-        if self.config()["enabled"] is False: # TODO avoid access from config()
+        if self.config().get('enabled', False): # TODO avoid access from config()
             return
         if self.is_dropdown_handler_injected:
             logger.debug("handler is already injected")
