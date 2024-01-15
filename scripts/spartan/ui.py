@@ -192,10 +192,11 @@ class UI:
         with gradio.Blocks(variant='compact') as root:  # Group() and Box() remove spacing
             with gradio.Accordion(label='Distributed', open=False):
                 # https://github.com/AUTOMATIC1111/stable-diffusion-webui/issues/6109#issuecomment-1403315784
+                enabled = self.world.config().get('enabled', True)
                 main_toggle = gradio.Checkbox(  # main on/off ext. toggle
                     elem_id='enable',
                     label='Enable',
-                    value=lambda: self.world.config().get('enabled', False),
+                    value=enabled,
                     interactive=True
                 )
                 main_toggle.input(self.main_toggle_btn)

@@ -171,7 +171,7 @@ class World:
         original = self[kwargs['label']]  # if worker doesn't already exist then just make a new one
         if original is None:
             new = Worker(**kwargs)
-            self._workers.append(Worker(**kwargs))
+            self._workers.append(new)
             return new
         else:
             for key in kwargs:
@@ -232,7 +232,7 @@ class World:
 
         # have every unbenched worker load the same weights before the benchmark
         for worker in unbenched_workers:
-            if worker.master:
+            if worker.master or worker.state == State.DISABLED:
                 continue
 
             sync_thread = Thread(target=worker.load_options, args=(shared.opts.sd_model_checkpoint, shared.opts.sd_vae))
@@ -446,7 +446,6 @@ class World:
 
         if deferred_images > 0:
             realtime_jobs = self.realtime_jobs()
-            images_per_job = deferred_images // len(realtime_jobs)
             saturated_jobs = []
 
             job_no = 0
@@ -460,12 +459,12 @@ class World:
                 stall_time = self.job_stall(
                     worker=job.worker,
                     payload=payload,
-                    batch_size=(job.batch_size + images_per_job)
+                    batch_size=(job.batch_size + 1)
                 )
 
                 if stall_time < self.job_timeout:
-                    if job.add_work(payload, batch_size=images_per_job):
-                        deferred_images -= images_per_job
+                    if job.add_work(payload, batch_size=1):
+                        deferred_images -= 1
                     else:
                         saturated_jobs.append(job)
 
@@ -589,7 +588,8 @@ class World:
                     logger.info(f"translated legacy config")
                     return config
             else:
-                open(self.config_path, 'w')
+                fresh_config = open(self.config_path, 'w')
+                fresh_config.close()
                 logger.info(f"Generated new config file at '{self.config_path}'")
 
         with open(self.config_path, 'r') as config:
@@ -605,8 +605,12 @@ class World:
         """
         config_raw = self.config()
         if config_raw is None:
-            logger.debug("cannot parse null config (present but empty config file?)")
+            logger.debug(
+                "cannot parse null config (present but empty config file?)\n"
+                "generating defaults for config"
+            )
             sh.benchmark_payload = Benchmark_Payload()
+            self.save_config()
             return
 
         config = ConfigModel(**config_raw)

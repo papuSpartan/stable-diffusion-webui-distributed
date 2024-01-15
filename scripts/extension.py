@@ -71,6 +71,7 @@ class Script(scripts.Script):
         return scripts.AlwaysVisible
 
     def ui(self, is_img2img):
+        self.world.load_config()
         extension_ui = UI(script=Script, world=Script.world)
         root, api_exposed = extension_ui.create_ui()
 

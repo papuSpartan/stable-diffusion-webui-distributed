@@ -87,7 +87,7 @@ class Worker:
 
     def __init__(self, address: Union[str, None] = None, port: int = 7860, label: Union[str, None] = None,
                  verify_remotes: bool = True, master: bool = False, tls: bool = False, state: State = State.IDLE,
-                 avg_ipm: float = 1.0, eta_percent_error=None, user: str = None, password: str = None, pixel_cap: int = None
+                 avg_ipm: float = 1.0, eta_percent_error=None, user: str = None, password: str = None, pixel_cap: int = -1
                  ):
 
         if eta_percent_error is None:
