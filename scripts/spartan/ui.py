@@ -185,11 +185,19 @@ class UI:
         else:
             self.world.inject_model_dropdown_handler()
 
+    def reset_error_correction_btn(self):
+        for worker in self.world._workers:
+            logger.debug(f"Worker '{worker.label}' mpe before wiping:\n{worker.eta_percent_error}")
+            worker.eta_percent_error = []
+        self.world.save_config()
+
     # end handlers
 
     def create_ui(self):
-        """creates the extension UI within a gradio.Box() and returns it"""
-        with gradio.Blocks(variant='compact') as root:  # Group() and Box() remove spacing
+        """creates the extension UI and returns relevant components"""
+        components = []
+
+        with gradio.Blocks(variant='compact'):  # Group() and Box() remove spacing
             with gradio.Accordion(label='Distributed', open=False):
                 # https://github.com/AUTOMATIC1111/stable-diffusion-webui/issues/6109#issuecomment-1403315784
                 enabled = self.world.config().get('enabled', True)
@@ -200,6 +208,8 @@ class UI:
                     interactive=True
                 )
                 main_toggle.input(self.main_toggle_btn)
+                setattr(main_toggle, 'do_not_save_to_config', True)  # ui_loadsave.py apply_field()
+                components.append(main_toggle)
 
                 with gradio.Tab('Status') as status_tab:
                     status = gradio.Textbox(elem_id='status', show_label=False, interactive=False)
@@ -221,6 +231,7 @@ class UI:
                     refresh_status_btn.click(self.status_btn, inputs=[], outputs=[jobs, status, logs])
 
                     status_tab.select(fn=self.status_btn, inputs=[], outputs=[jobs, status, logs])
+                    components += [status, jobs, logs, refresh_status_btn]
 
                 with gradio.Tab('Utils'):
                     with gradio.Row():
@@ -240,6 +251,8 @@ class UI:
                         reconnect_lost_workers_btn.style(full_width=False)
                         reconnect_lost_workers_btn.click(self.world.ping_remotes)
 
+                        components += [refresh_checkpoints_btn, run_usr_btn, reload_config_btn, reconnect_lost_workers_btn]
+
                     with gradio.Row():
                         interrupt_all_btn = gradio.Button(value='Interrupt all', variant='stop')
                         interrupt_all_btn.style(full_width=False)
@@ -253,6 +266,11 @@ class UI:
                         clear_queue_btn = gradio.Button(value='Clear local webui queue', variant='stop')
                         clear_queue_btn.style(full_width=False)
                         clear_queue_btn.click(self.clear_queue_btn)
+                        reset_error_correction_btn = gradio.Button(value='Clear ETA MPE')
+                        reset_error_correction_btn.style(full_width=False)
+                        reset_error_correction_btn.click(self.reset_error_correction_btn)
+
+                    components += [interrupt_all_btn, redo_benchmarks_btn, clear_queue_btn, reset_error_correction_btn]
 
                 with gradio.Tab('Worker Config'):
                     worker_select_dropdown = gradio.Dropdown(
@@ -269,6 +287,7 @@ class UI:
                     worker_disabled_cbx = gradio.Checkbox(
                         label='disabled'
                     )
+                    components += [worker_select_dropdown, worker_address_field, worker_port_field, worker_tls_cbx, worker_disabled_cbx]
 
                     with gradio.Accordion(label='Advanced', open=False):
                         model_override_dropdown = gradio.Dropdown(label='Model override')
@@ -295,6 +314,8 @@ class UI:
                             worker_select_dropdown
                         ])
 
+                        components += [model_override_dropdown, pixel_cap, worker_api_auth_cbx, worker_user_field, worker_password_field, update_credentials_btn]
+
                     with gradio.Row():
                         save_worker_btn = gradio.Button(value='Add/Update Worker')
                         save_worker_btn.click(self.save_worker_btn,
@@ -309,6 +330,7 @@ class UI:
                         remove_worker_btn = gradio.Button(value='Remove Worker', variant='stop')
                         remove_worker_btn.click(self.remove_worker_btn, inputs=worker_select_dropdown,
                                                 outputs=[worker_select_dropdown])
+                        components += [save_worker_btn, remove_worker_btn]
 
                     worker_select_dropdown.select(
                         self.populate_worker_config_from_selection,
@@ -336,6 +358,7 @@ class UI:
 
                     save_btn = gradio.Button(value='Update')
                     save_btn.click(fn=self.save_btn, inputs=[thin_client_cbx, job_timeout])
+                    components += [thin_client_cbx, job_timeout, save_btn]
 
                 with gradio.Tab('Help'):
                     gradio.Markdown(
@@ -345,4 +368,4 @@ class UI:
                         """
                     )
 
-            return root.children, [thin_client_cbx, job_timeout]
+            return components

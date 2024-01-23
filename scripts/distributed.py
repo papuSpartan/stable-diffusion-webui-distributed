@@ -73,13 +73,14 @@ class Script(scripts.Script):
     def ui(self, is_img2img):
         self.world.load_config()
         extension_ui = UI(script=Script, world=Script.world)
-        root, api_exposed = extension_ui.create_ui()
+        # root, api_exposed = extension_ui.create_ui()
+        components = extension_ui.create_ui()
 
         # The first injection of handler for the models dropdown(sd_model_checkpoint) which is often present
         # in the quick-settings bar of a user. Helps ensure model swaps propagate to all nodes ASAP.
         Script.world.inject_model_dropdown_handler()
         # return some components that should be exposed to the api
-        return api_exposed
+        return components
 
     @staticmethod
     def add_to_gallery(processed, p):

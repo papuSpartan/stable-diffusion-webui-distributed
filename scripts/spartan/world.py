@@ -445,7 +445,6 @@ class World:
         ####################################################
 
         if deferred_images > 0:
-            realtime_jobs = self.realtime_jobs()
             saturated_jobs = []
 
             job_no = 0
