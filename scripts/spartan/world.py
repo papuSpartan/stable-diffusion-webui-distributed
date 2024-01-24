@@ -511,16 +511,16 @@ class World:
         #####################################
 
         # Now that this worker would (otherwise) not be doing anything, see if it can still do something.
-        # Calculate how many images it can output in the time that it takes the slowest real-time worker to do so.
+        # Calculate how many images it can output in the time that it takes the fastest real-time worker to do so.
 
         for job in self.jobs:
             if job.complementary is False:
                 continue
 
-            slowest_active_worker = self.fastest_realtime_job().worker
+            fastest_active = self.fastest_realtime_job().worker
             for j in self.jobs:
-                if j.worker.label == slowest_active_worker.label:
-                    slack_time = slowest_active_worker.batch_eta(payload=payload, batch_size=j.batch_size) + self.job_timeout
+                if j.worker.label == fastest_active.label:
+                    slack_time = fastest_active.batch_eta(payload=payload, batch_size=j.batch_size) + self.job_timeout
             logger.debug(f"There's {slack_time:.2f}s of slack time available for worker '{job.worker.label}'")
 
             # see how long it would take to produce only 1 image on this complementary worker
@@ -615,9 +615,9 @@ class World:
         config = ConfigModel(**config_raw)
 
         # saves config schema to <extension>/distributed-config.schema.json
-        # print(models.Config.schema_json())
-        # with open(self.extension_path.joinpath("distributed-config.schema.json"), "w") as schema_file:
-        #     json.dump(json.loads(models.Config.schema_json()), schema_file, indent=3)
+        # print(ConfigModel.schema_json())
+        # with open(extension_path.joinpath("distributed-config.schema.json"), "w") as schema_file:
+        #     json.dump(json.loads(ConfigModel.schema_json()), schema_file, indent=3)
 
         for w in config.workers:
             label = next(iter(w.keys()))
@@ -628,6 +628,7 @@ class World:
 
         sh.benchmark_payload = Benchmark_Payload(**config.benchmark_payload)
         self.job_timeout = config.job_timeout
+        self.enabled = config.enabled
 
         logger.debug("config loaded")
 
