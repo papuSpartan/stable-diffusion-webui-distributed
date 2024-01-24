@@ -1,10 +1,12 @@
 # stable-diffusion-webui-distributed
 This extension enables you to chain multiple webui instances together for txt2img and img2img generation tasks.
 
-There is an emphasis on minimizing the perceived latency/lag of large batch jobs in the **main** sdwui instance.
+*For those with **multi-gpu** setups, **yes** this can be used for generation across all of those devices.*
+
+The main goal is minimizing the lag of (high batch size) requests from the **main** sdwui instance.
 
 ![alt text](doc/sdwui_distributed.drawio.png)\
-*Diagram showing Master/slave architecture of the extension*
+*Diagram shows Master/slave architecture of the extension*
 
 **Contributions and feedback are much appreciated!**
 
@@ -23,13 +25,12 @@ Ie. if you're using sd-1.5 on the controlling instance, then the sd-1.5 model sh
 *if you want to easily sync models between your nodes, you might want to use something like [rclone](https://rclone.org/)*
 
 ### Tips
-- This is not an **always on** script, you have to select it in the script dropdown of the tab you are in.
 - If benchmarking fails, try hitting the **Redo benchmark** button under the script's **Util** tab.
 - If any remote is taking far too long to returns its share of the batch, you can hit the **Interrupt** button in the **Util** tab.
+- If you think that a worker is being under-utilized, you can adjust the job timeout setting to be higher. However, doing this may be suboptimal in cases where the "slow" machine is **actually** really slow. Alternatively, you may just need to do a re-benchmark or manually edit the config.
 
 ### Command-line arguments
 
-**--distributed-remotes** Enter n pairs of sockets corresponding to remote workers in the form `name:address:port` (deprecated)\
-**--distributed-skip-verify-remotes** Disable verification of remote worker TLS certificates (useful for if you are using self-signed certs like with auto tls-https)\
+**--distributed-skip-verify-remotes** Disable verification of remote worker TLS certificates (useful for if you are using self-signed certs like with [auto tls-https](https://github.com/papuSpartan/stable-diffusion-webui-auto-tls-https))\
 **--distributed-remotes-autosave** Enable auto-saving of remote worker generations\
 **--distributed-debug** Enable debug information
