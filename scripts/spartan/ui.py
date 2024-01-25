@@ -269,8 +269,9 @@ class UI:
                         reset_error_correction_btn = gradio.Button(value='Clear ETA MPE')
                         reset_error_correction_btn.style(full_width=False)
                         reset_error_correction_btn.click(self.reset_error_correction_btn)
+                        components += [clear_queue_btn, reset_error_correction_btn]
 
-                    components += [interrupt_all_btn, redo_benchmarks_btn, clear_queue_btn, reset_error_correction_btn]
+                    components += [interrupt_all_btn, redo_benchmarks_btn]
 
                 with gradio.Tab('Worker Config'):
                     worker_select_dropdown = gradio.Dropdown(
