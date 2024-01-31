@@ -286,20 +286,22 @@ class Worker:
         eta = None
 
         try:
-            # if state is already WORKING then weights may be loading on worker
-            # prevents issue where model override loads a large model and consecutive requests timeout
-            max_wait = 30
-            waited = 0
-            while self.state == State.WORKING:
-                if waited >= max_wait:
-                    break
 
-                time.sleep(1)
-                waited += 1
-            if waited != 0:
-                logger.debug(f"waited {waited}s for worker '{self.label}' to IDLE before consecutive request")
-                if waited >= (0.85 * max_wait):
-                    logger.warning("this seems long, so if you see this message often, consider reporting an issue")
+            if self.jobs_requested != 0:  # prevent potential hang at startup
+                # if state is already WORKING then weights may be loading on worker
+                # prevents issue where model override loads a large model and consecutive requests timeout
+                max_wait = 30
+                waited = 0
+                while self.state == State.WORKING:
+                    if waited >= max_wait:
+                        break
+
+                    time.sleep(1)
+                    waited += 1
+                if waited != 0:
+                    logger.debug(f"waited {waited}s for worker '{self.label}' to IDLE before consecutive request")
+                    if waited >= (0.85 * max_wait):
+                        logger.warning("this seems long, so if you see this message often, consider reporting an issue")
 
             self.state = State.WORKING
 
