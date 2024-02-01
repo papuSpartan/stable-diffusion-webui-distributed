@@ -14,7 +14,7 @@ from modules.api.api import encode_pil_to_base64
 from modules.shared import cmd_opts
 from modules.shared import state as master_state
 from . import shared as sh
-from .shared import logger, warmup_samples
+from .shared import logger, warmup_samples, LOG_LEVEL
 
 try:
     from webui import server_name
@@ -101,7 +101,7 @@ class Worker:
         self.response_time = None
         self.loaded_model = ''
         self.loaded_vae = ''
-        self.supported_scripts = None
+        self.supported_scripts = {}
         self.label = label
         self.tls = tls
         self.verify_remotes = verify_remotes
@@ -111,6 +111,7 @@ class Worker:
         self.queried = False
         self.benchmarked = False
         self.pixel_cap = pixel_cap  # ex. limit, 2 512x512 images at once: (2*(512*512)) = 524288 px
+        self.jobs_requested = 0
 
         # master specific setup
         if master is True:
@@ -285,20 +286,22 @@ class Worker:
         eta = None
 
         try:
-            # if state is already WORKING then weights may be loading on worker
-            # prevents issue where model override loads a large model and consecutive requests timeout
-            max_wait = 30
-            waited = 0
-            while self.state == State.WORKING:
-                if waited >= max_wait:
-                    break
 
-                time.sleep(1)
-                waited += 1
-            if waited != 0:
-                logger.debug(f"waited {waited}s for worker '{self.label}' to IDLE before consecutive request")
-                if waited >= (0.85 * max_wait):
-                    logger.warning("this seems long, so if you see this message often, consider reporting an issue")
+            if self.jobs_requested != 0:  # prevent potential hang at startup
+                # if state is already WORKING then weights may be loading on worker
+                # prevents issue where model override loads a large model and consecutive requests timeout
+                max_wait = 30
+                waited = 0
+                while self.state == State.WORKING:
+                    if waited >= max_wait:
+                        break
+
+                    time.sleep(1)
+                    waited += 1
+                if waited != 0:
+                    logger.debug(f"waited {waited}s for worker '{self.label}' to IDLE before consecutive request")
+                    if waited >= (0.85 * max_wait):
+                        logger.warning("this seems long, so if you see this message often, consider reporting an issue")
 
             self.state = State.WORKING
 
@@ -361,31 +364,33 @@ class Worker:
                         images.append(image)
                     payload['init_images'] = images
 
-                compatible_scripts = {}
-                incompatible_scripts = []
                 alwayson_scripts = payload.get('alwayson_scripts', None)
                 if alwayson_scripts is not None:  # key may not always exist, benchmarking being one example
-                    for script in self.supported_scripts[mode]:
+                    matching_scripts = {}
+                    missing_scripts = []
+                    remote_scripts = self.supported_scripts[mode]
+                    for local_script in alwayson_scripts:
                         match = False
-                        for local_script in alwayson_scripts:
-                            if str.lower(local_script) == script:
-                                compatible_scripts[local_script] = alwayson_scripts[local_script]
+                        for remote_script in remote_scripts:
+                            if str.lower(local_script) == str.lower(remote_script):
+                                matching_scripts[local_script] = alwayson_scripts[local_script]
                                 match = True
-                                break
+                        if not match and str.lower(local_script) != 'distribute':
+                            missing_scripts.append(local_script)
 
-                        if not match:
-                            incompatible_scripts.append(script)
+                    if len(missing_scripts) > 0:  # warn about node to node script/extension mismatching
+                        message = "local script(s): "
+                        for script in range(0, len(missing_scripts)):
+                            message += f"\[{missing_scripts[script]}]"
+                            if script < len(missing_scripts) - 1:
+                                message += ', '
+                        message += f" seem to be unsupported by worker '{self.label}'\n"
+                        if LOG_LEVEL == 'DEBUG':  # only warn once per session unless at debug log level
+                            logger.debug(message)
+                        elif self.jobs_requested < 1:
+                            logger.warning(message)
 
-                    message = "local script(s): "
-                    for script in range(0, len(incompatible_scripts)):
-                        message += f"\[{incompatible_scripts[script]}]"
-                        if script < len(incompatible_scripts) - 1:
-                            message += ', '
-                    message += f" seem to be unsupported by worker '{self.label}'\n"
-                    message += f"these may simply need to be installed on '{self.label}' for full functionality"
-                    logger.warning(message)
-
-                    payload['alwayson_scripts'] = compatible_scripts
+                    payload['alwayson_scripts'] = matching_scripts
 
                 # if an image mask is present
                 image_mask = payload.get('image_mask', None)
@@ -491,6 +496,7 @@ class Worker:
             return
 
         self.state = State.IDLE
+        self.jobs_requested += 1
         return
 
     def benchmark(self) -> float:
