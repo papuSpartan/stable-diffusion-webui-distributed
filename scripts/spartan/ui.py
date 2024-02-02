@@ -74,7 +74,7 @@ class UI:
 
         return 'No active jobs!', worker_status, logs
 
-    def save_btn(self, thin_client_mode, job_timeout):
+    def save_btn(self, thin_client_mode, job_timeout, complement_production):
         """updates the options visible on the settings tab"""
 
         self.world.thin_client_mode = thin_client_mode
@@ -82,6 +82,7 @@ class UI:
         job_timeout = int(job_timeout)
         self.world.job_timeout = job_timeout
         logger.debug(f"job timeout is now {job_timeout} seconds")
+        self.world.complement_production = complement_production
         self.world.save_config()
 
     def save_worker_btn(self, label, address, port, tls, disabled):
@@ -200,11 +201,10 @@ class UI:
         with gradio.Blocks(variant='compact'):  # Group() and Box() remove spacing
             with gradio.Accordion(label='Distributed', open=False):
                 # https://github.com/AUTOMATIC1111/stable-diffusion-webui/issues/6109#issuecomment-1403315784
-                enabled = self.world.config().get('enabled', True)
                 main_toggle = gradio.Checkbox(  # main on/off ext. toggle
                     elem_id='enable',
                     label='Enable',
-                    value=enabled,
+                    value=self.world.enabled if self.world.enabled is not None else True,
                     interactive=True
                 )
                 main_toggle.input(self.main_toggle_btn)
@@ -357,9 +357,15 @@ class UI:
                              " equal share of the total request. Longer than 2 seconds is recommended."
                     )
 
+                    complement_production = gradio.Checkbox(
+                        label='Complement production',
+                        info='Prevents under-utilization of hardware by requesting additional images',
+                        value=self.world.complement_production
+                    )
+
                     save_btn = gradio.Button(value='Update')
-                    save_btn.click(fn=self.save_btn, inputs=[thin_client_cbx, job_timeout])
-                    components += [thin_client_cbx, job_timeout, save_btn]
+                    save_btn.click(fn=self.save_btn, inputs=[thin_client_cbx, job_timeout, complement_production])
+                    components += [thin_client_cbx, job_timeout, complement_production, save_btn]
 
                 with gradio.Tab('Help'):
                     gradio.Markdown(

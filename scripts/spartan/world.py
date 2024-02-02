@@ -95,6 +95,7 @@ class World:
         self.thin_client_mode = False
         self.enabled = True
         self.is_dropdown_handler_injected = False
+        self.complement_production = True
 
     def __getitem__(self, label: str) -> Worker:
         for worker in self._workers:
@@ -513,30 +514,33 @@ class World:
         # Now that this worker would (otherwise) not be doing anything, see if it can still do something.
         # Calculate how many images it can output in the time that it takes the fastest real-time worker to do so.
 
-        for job in self.jobs:
-            if job.complementary is False:
-                continue
+        if self.complement_production:
+            for job in self.jobs:
+                if job.complementary is False:
+                    continue
 
-            fastest_active = self.fastest_realtime_job().worker
-            for j in self.jobs:
-                if j.worker.label == fastest_active.label:
-                    slack_time = fastest_active.batch_eta(payload=payload, batch_size=j.batch_size) + self.job_timeout
-            logger.debug(f"There's {slack_time:.2f}s of slack time available for worker '{job.worker.label}'")
+                fastest_active = self.fastest_realtime_job().worker
+                for j in self.jobs:
+                    if j.worker.label == fastest_active.label:
+                        slack_time = fastest_active.batch_eta(payload=payload, batch_size=j.batch_size) + self.job_timeout
+                logger.debug(f"There's {slack_time:.2f}s of slack time available for worker '{job.worker.label}'")
 
-            # see how long it would take to produce only 1 image on this complementary worker
-            secs_per_batch_image = job.worker.batch_eta(payload=payload, batch_size=1)
-            num_images_compensate = int(slack_time / secs_per_batch_image)
-            logger.debug(
-                f"worker '{job.worker.label}':\n"
-                f"{num_images_compensate} complementary image(s) = {slack_time:.2f}s slack"
-                f"/ {secs_per_batch_image:.2f}s per requested image"
-            )
+                # see how long it would take to produce only 1 image on this complementary worker
+                secs_per_batch_image = job.worker.batch_eta(payload=payload, batch_size=1)
+                num_images_compensate = int(slack_time / secs_per_batch_image)
+                logger.debug(
+                    f"worker '{job.worker.label}':\n"
+                    f"{num_images_compensate} complementary image(s) = {slack_time:.2f}s slack"
+                    f"/ {secs_per_batch_image:.2f}s per requested image"
+                )
 
-            if not job.add_work(payload, batch_size=num_images_compensate):
-                # stay below pixel cap ceiling
-                request_img_size = payload['width'] * payload['height']
-                max_images = job.worker.pixel_cap // request_img_size
-                job.add_work(payload,batch_size=max_images)
+                if not job.add_work(payload, batch_size=num_images_compensate):
+                    # stay below pixel cap ceiling
+                    request_img_size = payload['width'] * payload['height']
+                    max_images = job.worker.pixel_cap // request_img_size
+                    job.add_work(payload, batch_size=max_images)
+        else:
+            logger.debug("complementary image production is disabled")
 
         distro_summary = "Job distribution:\n"
         iterations = payload['n_iter']
@@ -629,6 +633,7 @@ class World:
         sh.benchmark_payload = Benchmark_Payload(**config.benchmark_payload)
         self.job_timeout = config.job_timeout
         self.enabled = config.enabled
+        self.complement_production = config.complement_production
 
         logger.debug("config loaded")
 
@@ -641,7 +646,8 @@ class World:
             workers=[{worker.label: worker.model.dict()} for worker in self._workers],
             benchmark_payload=sh.benchmark_payload,
             job_timeout=self.job_timeout,
-            enabled=self.enabled
+            enabled=self.enabled,
+            complement_production=self.complement_production
         )
 
         with open(self.config_path, 'w+') as config_file:
