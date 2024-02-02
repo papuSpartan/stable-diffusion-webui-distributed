@@ -542,9 +542,14 @@ class World:
         else:
             logger.debug("complementary image production is disabled")
 
-        distro_summary = "Job distribution:\n"
         iterations = payload['n_iter']
-        distro_summary += f"{self.total_batch_size} * {iterations} iteration(s): {self.total_batch_size * iterations} images total\n"
+        num_returning = self.get_current_output_size()
+        num_complementary = num_returning - self.total_batch_size
+        distro_summary = "Job distribution:\n"
+        distro_summary += f"{self.total_batch_size} * {iterations} iteration(s)"
+        if num_complementary > 0:
+            distro_summary += f" + {num_complementary} complementary"
+        distro_summary += f": {num_returning} images total\n"
         for job in self.jobs:
             distro_summary += f"'{job.worker.label}' - {job.batch_size * iterations} image(s) @ {job.worker.avg_ipm:.2f} ipm\n"
         logger.info(distro_summary)
