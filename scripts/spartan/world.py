@@ -707,6 +707,11 @@ class World:
                     logger.info(msg)
                     gradio.Warning("Distributed: "+msg)
 
+    def restart_all(self):
+        for worker in self._workers:
+            worker.restart()
+
+
     def inject_model_dropdown_handler(self):
         if self.config().get('enabled', False): # TODO avoid access from config()
             return

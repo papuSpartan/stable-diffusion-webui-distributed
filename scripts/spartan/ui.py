@@ -192,6 +192,10 @@ class UI:
             worker.eta_percent_error = []
         self.world.save_config()
 
+    def restart_workers_btn(self, confirmed: bool):
+        if confirmed:
+            self.world.restart_all()
+
     # end handlers
 
     def create_ui(self):
@@ -250,6 +254,14 @@ class UI:
                         reconnect_lost_workers_btn = gradio.Button(value='Attempt reconnection with remotes')
                         reconnect_lost_workers_btn.style(full_width=False)
                         reconnect_lost_workers_btn.click(self.world.ping_remotes)
+
+                        restart_workers_btn = gradio.Button(value="🔁 Restart All", variant='stop')
+                        restart_workers_btn.style(full_width=False)
+                        restart_workers_btn.click(
+                            _js="confirm_restart_workers",
+                            fn=self.restart_workers_btn, inputs=[restart_workers_btn],
+                            outputs=[restart_workers_btn]
+                        )
 
                         components += [refresh_checkpoints_btn, run_usr_btn, reload_config_btn, reconnect_lost_workers_btn]
 

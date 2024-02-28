@@ -104,7 +104,6 @@ class Worker:
         self.supported_scripts = {}
         self.label = label
         self.tls = tls
-        self.verify_remotes = verify_remotes
         self.model_override: Union[str, None] = None
         self.free_vram: int = 0
         self.response = None
@@ -149,7 +148,7 @@ class Worker:
         self.session = requests.Session()
         self.session.auth = (self.user, self.password)
         # sometimes breaks: https://github.com/psf/requests/issues/2255
-        self.session.verify = not verify_remotes
+        self.session.verify = verify_remotes
 
     def __str__(self):
         return f"{self.address}:{self.port}"
@@ -601,12 +600,12 @@ class Worker:
         try:
             response = self.session.get(
                 self.full_url("memory"),
-                timeout=3,
-                verify=not self.verify_remotes
+                timeout=3
             )
             return response.status_code == 200
 
-        except requests.exceptions.ConnectionError:
+        except requests.exceptions.ConnectionError as e:
+            logger.error(e)
             return False
 
     def mark_unreachable(self):
@@ -674,3 +673,32 @@ class Worker:
             self.loaded_model = model_name
             if vae is not None:
                 self.loaded_vae = vae
+
+    def restart(self) -> bool:
+        err_msg = f"could not restart worker '{self.label}'"
+        success_msg = f"worker '{self.label}' is restarting"
+        if self.master: # shouldn't really need to restart master (unless for convenience at some point)
+            return True
+
+        response = None
+        try:
+            response = self.session.post(self.full_url("server-restart"), timeout=3)
+        except requests.ConnectionError:  # the successful case (kinda)
+            # have to assume that the worker is actually restarting because currently sdwui does not gracefully close
+            # the connection
+            logger.info(success_msg)
+            return True
+        except requests.RequestException as e:
+            logger.error(f"{err_msg}:\n{e}")
+            return False
+
+        if response.status_code == 200:
+            logger.info(success_msg)
+            return True
+        elif response.status_code == 404:
+            logger.error(f"try adding --api-server-stop to '{self.label}'s launch arguments (couldn't restart)\n"
+                         "*requires webui version 1.5(5be6c02) or later")
+            return False
+
+        logger.error(f"{err_msg}: {response}")
+        return False
