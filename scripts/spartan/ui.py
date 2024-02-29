@@ -230,8 +230,7 @@ class UI:
                         info='top-most message is newest'
                     )
 
-                    refresh_status_btn = gradio.Button(value='Refresh')
-                    refresh_status_btn.style(size='sm')
+                    refresh_status_btn = gradio.Button(value='Refresh 🔄', size='sm')
                     refresh_status_btn.click(self.status_btn, inputs=[], outputs=[jobs, status, logs])
 
                     status_tab.select(fn=self.status_btn, inputs=[], outputs=[jobs, status, logs])
@@ -239,47 +238,38 @@ class UI:
 
                 with gradio.Tab('Utils'):
                     with gradio.Row():
-                        refresh_checkpoints_btn = gradio.Button(value='Refresh checkpoints')
-                        refresh_checkpoints_btn.style(full_width=False)
+                        refresh_checkpoints_btn = gradio.Button(value='🆕 Refresh checkpoints')
                         refresh_checkpoints_btn.click(self.world.refresh_checkpoints)
 
-                        run_usr_btn = gradio.Button(value='Run user script')
-                        run_usr_btn.style(full_width=False)
+                        run_usr_btn = gradio.Button(value='⚙️ Run script')
                         run_usr_btn.click(self.user_script_btn)
 
-                        reload_config_btn = gradio.Button(value='Reload config from file')
-                        reload_config_btn.style(full_width=False)
+                        reload_config_btn = gradio.Button(value='📜 Reload config')
                         reload_config_btn.click(self.world.load_config)
 
-                        reconnect_lost_workers_btn = gradio.Button(value='Attempt reconnection with remotes')
-                        reconnect_lost_workers_btn.style(full_width=False)
+                        reconnect_lost_workers_btn = gradio.Button(value='🔌 Reconnect workers')
                         reconnect_lost_workers_btn.click(self.world.ping_remotes)
 
                         restart_workers_btn = gradio.Button(value="🔁 Restart All", variant='stop')
-                        restart_workers_btn.style(full_width=False)
                         restart_workers_btn.click(
                             _js="confirm_restart_workers",
                             fn=self.restart_workers_btn, inputs=[restart_workers_btn],
                             outputs=[restart_workers_btn]
                         )
 
-                        components += [refresh_checkpoints_btn, run_usr_btn, reload_config_btn, reconnect_lost_workers_btn]
+                        components += [refresh_checkpoints_btn, run_usr_btn, reload_config_btn, reconnect_lost_workers_btn, restart_workers_btn]
 
                     with gradio.Row():
-                        interrupt_all_btn = gradio.Button(value='Interrupt all', variant='stop')
-                        interrupt_all_btn.style(full_width=False)
+                        interrupt_all_btn = gradio.Button(value='⏸️ Interrupt all', variant='stop')
                         interrupt_all_btn.click(self.world.interrupt_remotes)
 
-                        redo_benchmarks_btn = gradio.Button(value='Redo benchmarks', variant='stop')
-                        redo_benchmarks_btn.style(full_width=False)
+                        redo_benchmarks_btn = gradio.Button(value='📊 Redo benchmarks', variant='stop')
                         redo_benchmarks_btn.click(self.benchmark_btn, inputs=[], outputs=[])
 
                     if LOG_LEVEL == 'DEBUG':
                         clear_queue_btn = gradio.Button(value='Clear local webui queue', variant='stop')
-                        clear_queue_btn.style(full_width=False)
                         clear_queue_btn.click(self.clear_queue_btn)
                         reset_error_correction_btn = gradio.Button(value='Clear ETA MPE')
-                        reset_error_correction_btn.style(full_width=False)
                         reset_error_correction_btn.click(self.reset_error_correction_btn)
                         components += [clear_queue_btn, reset_error_correction_btn]
 
