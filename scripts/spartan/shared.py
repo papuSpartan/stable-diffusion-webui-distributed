@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Union
 from modules.shared import cmd_opts
 from pydantic import BaseModel, Field
+from rich.text import Text
 from rich.logging import RichHandler
 
 extension_path = Path(abspath(getsourcefile(lambda: 0))).parent.parent.parent
@@ -14,7 +15,14 @@ extension_path = Path(abspath(getsourcefile(lambda: 0))).parent.parent.parent
 # https://rich.readthedocs.io/en/stable/logging.html
 LOG_LEVEL = 'DEBUG' if cmd_opts.distributed_debug else 'INFO'
 logger = logging.getLogger("distributed")
-rich_handler = RichHandler(
+
+class MyRichHandler(RichHandler):
+    def get_level_text(self, record):
+        rich_output = super().get_level_text(record)
+        prefix = Text.from_markup("[bold][link=https://github.com/papuSpartan/stable-diffusion-webui-distributed][reverse]DISTRIBUTED[/reverse][/link][/bold] | ")
+        return prefix+rich_output
+
+rich_handler = MyRichHandler(
     rich_tracebacks=True,
     markup=True,
     show_time=False,
