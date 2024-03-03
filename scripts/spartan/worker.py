@@ -87,7 +87,7 @@ class Worker:
 
     def __init__(self, address: Union[str, None] = None, port: int = 7860, label: Union[str, None] = None,
                  verify_remotes: bool = True, master: bool = False, tls: bool = False, state: State = State.IDLE,
-                 avg_ipm: float = 1.0, eta_percent_error=None, user: str = None, password: str = None, pixel_cap: int = -1
+                 avg_ipm: float = 0.0, eta_percent_error=None, user: str = None, password: str = None, pixel_cap: int = -1
                  ):
 
         if eta_percent_error is None:
@@ -363,33 +363,36 @@ class Worker:
                         images.append(image)
                     payload['init_images'] = images
 
-                alwayson_scripts = payload.get('alwayson_scripts', None)
-                if alwayson_scripts is not None:  # key may not always exist, benchmarking being one example
-                    matching_scripts = {}
-                    missing_scripts = []
-                    remote_scripts = self.supported_scripts[mode]
-                    for local_script in alwayson_scripts:
-                        match = False
-                        for remote_script in remote_scripts:
-                            if str.lower(local_script) == str.lower(remote_script):
-                                matching_scripts[local_script] = alwayson_scripts[local_script]
-                                match = True
-                        if not match and str.lower(local_script) != 'distribute':
-                            missing_scripts.append(local_script)
+                alwayson_scripts = payload.get('alwayson_scripts', None)  # key may not always exist, benchmarking being one example
+                if alwayson_scripts is not None:
+                    if len(self.supported_scripts) <= 0:
+                        payload['alwayson_scripts'] = {}
+                    else:
+                        matching_scripts = {}
+                        missing_scripts = []
+                        remote_scripts = self.supported_scripts[mode]
+                        for local_script in alwayson_scripts:
+                            match = False
+                            for remote_script in remote_scripts:
+                                if str.lower(local_script) == str.lower(remote_script):
+                                    matching_scripts[local_script] = alwayson_scripts[local_script]
+                                    match = True
+                            if not match and str.lower(local_script) != 'distribute':
+                                missing_scripts.append(local_script)
 
-                    if len(missing_scripts) > 0:  # warn about node to node script/extension mismatching
-                        message = "local script(s): "
-                        for script in range(0, len(missing_scripts)):
-                            message += f"\[{missing_scripts[script]}]"
-                            if script < len(missing_scripts) - 1:
-                                message += ', '
-                        message += f" seem to be unsupported by worker '{self.label}'\n"
-                        if LOG_LEVEL == 'DEBUG':  # only warn once per session unless at debug log level
-                            logger.debug(message)
-                        elif self.jobs_requested < 1:
-                            logger.warning(message)
+                        if len(missing_scripts) > 0:  # warn about node to node script/extension mismatching
+                            message = "local script(s): "
+                            for script in range(0, len(missing_scripts)):
+                                message += f"\[{missing_scripts[script]}]"
+                                if script < len(missing_scripts) - 1:
+                                    message += ', '
+                            message += f" seem to be unsupported by worker '{self.label}'\n"
+                            if LOG_LEVEL == 'DEBUG':  # only warn once per session unless at debug log level
+                                logger.debug(message)
+                            elif self.jobs_requested < 1:
+                                logger.warning(message)
 
-                    payload['alwayson_scripts'] = matching_scripts
+                        payload['alwayson_scripts'] = matching_scripts
 
                 # if an image mask is present
                 image_mask = payload.get('image_mask', None)

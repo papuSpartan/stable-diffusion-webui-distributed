@@ -403,8 +403,7 @@ class World:
         filtered: List[Worker] = []
         for worker in self._workers:
             if worker.avg_ipm is not None and worker.avg_ipm <= 0:
-                logger.warning(f"config reports invalid speed (0 ipm) for worker '{worker.label}', setting default of 1 ipm.\nplease re-benchmark")
-                worker.avg_ipm = 1
+                logger.warning(f"config reports invalid speed (0 ipm) for worker '{worker.label}'\nplease re-benchmark")
                 continue
             if worker.master and self.thin_client_mode:
                 continue
