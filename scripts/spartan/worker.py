@@ -87,7 +87,7 @@ class Worker:
 
     def __init__(self, address: Union[str, None] = None, port: int = 7860, label: Union[str, None] = None,
                  verify_remotes: bool = True, master: bool = False, tls: bool = False, state: State = State.IDLE,
-                 avg_ipm: float = 1.0, eta_percent_error=None, user: str = None, password: str = None, pixel_cap: int = -1
+                 avg_ipm: float = 0.0, eta_percent_error=None, user: str = None, password: str = None, pixel_cap: int = -1
                  ):
 
         if eta_percent_error is None:
@@ -104,7 +104,6 @@ class Worker:
         self.supported_scripts = {}
         self.label = label
         self.tls = tls
-        self.verify_remotes = verify_remotes
         self.model_override: Union[str, None] = None
         self.free_vram: int = 0
         self.response = None
@@ -149,7 +148,7 @@ class Worker:
         self.session = requests.Session()
         self.session.auth = (self.user, self.password)
         # sometimes breaks: https://github.com/psf/requests/issues/2255
-        self.session.verify = not verify_remotes
+        self.session.verify = verify_remotes
 
     def __str__(self):
         return f"{self.address}:{self.port}"
@@ -364,33 +363,36 @@ class Worker:
                         images.append(image)
                     payload['init_images'] = images
 
-                alwayson_scripts = payload.get('alwayson_scripts', None)
-                if alwayson_scripts is not None:  # key may not always exist, benchmarking being one example
-                    matching_scripts = {}
-                    missing_scripts = []
-                    remote_scripts = self.supported_scripts[mode]
-                    for local_script in alwayson_scripts:
-                        match = False
-                        for remote_script in remote_scripts:
-                            if str.lower(local_script) == str.lower(remote_script):
-                                matching_scripts[local_script] = alwayson_scripts[local_script]
-                                match = True
-                        if not match and str.lower(local_script) != 'distribute':
-                            missing_scripts.append(local_script)
+                alwayson_scripts = payload.get('alwayson_scripts', None)  # key may not always exist, benchmarking being one example
+                if alwayson_scripts is not None:
+                    if len(self.supported_scripts) <= 0:
+                        payload['alwayson_scripts'] = {}
+                    else:
+                        matching_scripts = {}
+                        missing_scripts = []
+                        remote_scripts = self.supported_scripts[mode]
+                        for local_script in alwayson_scripts:
+                            match = False
+                            for remote_script in remote_scripts:
+                                if str.lower(local_script) == str.lower(remote_script):
+                                    matching_scripts[local_script] = alwayson_scripts[local_script]
+                                    match = True
+                            if not match and str.lower(local_script) != 'distribute':
+                                missing_scripts.append(local_script)
 
-                    if len(missing_scripts) > 0:  # warn about node to node script/extension mismatching
-                        message = "local script(s): "
-                        for script in range(0, len(missing_scripts)):
-                            message += f"\[{missing_scripts[script]}]"
-                            if script < len(missing_scripts) - 1:
-                                message += ', '
-                        message += f" seem to be unsupported by worker '{self.label}'\n"
-                        if LOG_LEVEL == 'DEBUG':  # only warn once per session unless at debug log level
-                            logger.debug(message)
-                        elif self.jobs_requested < 1:
-                            logger.warning(message)
+                        if len(missing_scripts) > 0:  # warn about node to node script/extension mismatching
+                            message = "local script(s): "
+                            for script in range(0, len(missing_scripts)):
+                                message += f"\[{missing_scripts[script]}]"
+                                if script < len(missing_scripts) - 1:
+                                    message += ', '
+                            message += f" seem to be unsupported by worker '{self.label}'\n"
+                            if LOG_LEVEL == 'DEBUG':  # only warn once per session unless at debug log level
+                                logger.debug(message)
+                            elif self.jobs_requested < 1:
+                                logger.warning(message)
 
-                    payload['alwayson_scripts'] = matching_scripts
+                        payload['alwayson_scripts'] = matching_scripts
 
                 # if an image mask is present
                 image_mask = payload.get('image_mask', None)
@@ -601,12 +603,12 @@ class Worker:
         try:
             response = self.session.get(
                 self.full_url("memory"),
-                timeout=3,
-                verify=not self.verify_remotes
+                timeout=3
             )
             return response.status_code == 200
 
-        except requests.exceptions.ConnectionError:
+        except requests.exceptions.ConnectionError as e:
+            logger.error(e)
             return False
 
     def mark_unreachable(self):
@@ -674,3 +676,32 @@ class Worker:
             self.loaded_model = model_name
             if vae is not None:
                 self.loaded_vae = vae
+
+    def restart(self) -> bool:
+        err_msg = f"could not restart worker '{self.label}'"
+        success_msg = f"worker '{self.label}' is restarting"
+        if self.master: # shouldn't really need to restart master (unless for convenience at some point)
+            return True
+
+        response = None
+        try:
+            response = self.session.post(self.full_url("server-restart"), timeout=3)
+        except requests.ConnectionError:  # the successful case (kinda)
+            # have to assume that the worker is actually restarting because currently sdwui does not gracefully close
+            # the connection
+            logger.info(success_msg)
+            return True
+        except requests.RequestException as e:
+            logger.error(f"{err_msg}:\n{e}")
+            return False
+
+        if response.status_code == 200:
+            logger.info(success_msg)
+            return True
+        elif response.status_code == 404:
+            logger.error(f"try adding --api-server-stop to '{self.label}'s launch arguments (couldn't restart)\n"
+                         "*requires webui version 1.5(5be6c02) or later")
+            return False
+
+        logger.error(f"{err_msg}: {response}")
+        return False

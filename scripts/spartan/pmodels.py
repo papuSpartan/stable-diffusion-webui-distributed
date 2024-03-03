@@ -41,3 +41,4 @@ class ConfigModel(BaseModel):
     )
     job_timeout: Optional[int] = Field(default=3)
     enabled: Optional[bool] = Field(description="Whether the extension as a whole should be active or disabled", default=True)
+    complement_production: Optional[bool] = Field(description="Whether to generate complementary images to prevent under-utilizing hardware", default=True)
