@@ -1,6 +1,21 @@
 # Change Log
 Formatting: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
+## [2.1.0] - 2024-3-03
+
+### Added
+- Ability to disable complementary/"bonus" image production under settings tab
+- Utility for quickly restarting all remote machines under utils tab
+- Prefix in logging to visually separate from other extensions or output
+
+### Changed
+- Improved UI
+- Complementary production is now highlighted in the job distribution summary
+
+### Fixed
+- Problem preventing automatic benchmarking
+- Gradio deprecation warnings
+
 ## [2.0.2] - 2024-1-31
 
 ### Fixed
