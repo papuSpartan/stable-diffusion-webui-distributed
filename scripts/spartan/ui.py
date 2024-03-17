@@ -25,10 +25,17 @@ class UI:
         """executes a script placed by the user at <extension>/user/sync*"""
         user_scripts = Path(os.path.abspath(__file__)).parent.parent.joinpath('user')
 
+        user_script = None
         for file in user_scripts.iterdir():
             logger.debug(f"found possible script {file.name}")
             if file.is_file() and file.name.startswith('sync'):
                 user_script = file
+        if user_script is None:
+            logger.error(
+                "couldn't find user script\n"
+                "script must be placed under <extension>/user/ and filename must begin with sync"
+            )
+            return False
 
         suffix = user_script.suffix[1:]
 
