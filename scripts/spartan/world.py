@@ -631,6 +631,8 @@ class World:
             label = next(iter(w.keys()))
             fields = w[label].__dict__
             fields['label'] = label
+            # TODO must be overridden everytime here or later converted to a config file variable at some point
+            fields['verify_remotes'] = self.verify_remotes
 
             self.add_worker(**fields)
 
@@ -679,8 +681,6 @@ class World:
                     if worker.queried and worker.state == State.IDLE:  # TODO worker.queried
                         continue
 
-                    # for now skip/remove scripts that are not "always on" since there is currently no way to run
-                    # them at the same time as distributed
                     supported_scripts = {
                         'txt2img': [],
                         'img2img': []
