@@ -109,7 +109,7 @@ class UI:
             self.world.add_worker(
                 label=label,
                 address=address,
-                port=port,
+                port=port if len(port) > 0 else 7860,
                 tls=tls,
                 state=state
             )
