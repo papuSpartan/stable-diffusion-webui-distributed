@@ -247,7 +247,7 @@ class UI:
                         reload_config_btn = gradio.Button(value='📜 Reload config')
                         reload_config_btn.click(self.world.load_config)
 
-                        redo_benchmarks_btn = gradio.Button(value='📊 Redo benchmarks', variant='stop')
+                        redo_benchmarks_btn = gradio.Button(value='📊 Redo benchmarks')
                         redo_benchmarks_btn.click(self.benchmark_btn, inputs=[], outputs=[])
 
                         run_usr_btn = gradio.Button(value='⚙️ Run script')
@@ -259,10 +259,10 @@ class UI:
                         reconnect_lost_workers_btn = gradio.Button(value='🔌 Reconnect workers')
                         reconnect_lost_workers_btn.click(self.world.ping_remotes)
 
-                        interrupt_all_btn = gradio.Button(value='⏸️ Interrupt all', variant='stop')
+                        interrupt_all_btn = gradio.Button(value='⏸️ Interrupt all')
                         interrupt_all_btn.click(self.world.interrupt_remotes)
 
-                        restart_workers_btn = gradio.Button(value="🔁 Restart All", variant='stop')
+                        restart_workers_btn = gradio.Button(value="🔁 Restart All")
                         restart_workers_btn.click(
                             _js="confirm_restart_workers",
                             fn=lambda confirmed: self.world.restart_all() if confirmed else None,
