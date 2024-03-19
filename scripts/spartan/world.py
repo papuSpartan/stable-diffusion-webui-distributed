@@ -530,7 +530,7 @@ class World:
                 logger.debug(
                     f"worker '{job.worker.label}':\n"
                     f"{num_images_compensate} complementary image(s) = {slack_time:.2f}s slack"
-                    f"/ {secs_per_batch_image:.2f}s per requested image"
+                    f" ÷ {secs_per_batch_image:.2f}s per requested image"
                 )
 
                 if not job.add_work(payload, batch_size=num_images_compensate):

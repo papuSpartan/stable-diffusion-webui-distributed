@@ -85,7 +85,6 @@ class Script(scripts.Script):
     @staticmethod
     def add_to_gallery(processed, p):
         """adds generated images to the image gallery after waiting for all workers to finish"""
-        webui_state.textinfo = "Distributed - injecting images"
 
         def processed_inject_image(image, info_index, save_path_override=None, grid=False, response=None):
             image_params: json = response['parameters']
@@ -161,11 +160,13 @@ class Script(scripts.Script):
         logger.debug(f"Took master {master_elapsed:.2f}s")
 
         # wait for response from all workers
+        webui_state.textinfo = "Distributed - receiving results"
         for thread in Script.worker_threads:
             logger.debug(f"waiting for worker thread '{thread.name}'")
             thread.join()
         Script.worker_threads.clear()
         logger.debug("all worker request threads returned")
+        webui_state.textinfo = "Distributed - injecting images"
 
         # some worker which we know has a good response that we can use for generating the grid
         donor_worker = None
