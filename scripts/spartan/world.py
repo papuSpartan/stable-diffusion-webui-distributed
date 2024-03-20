@@ -233,7 +233,7 @@ class World:
 
         # have every unbenched worker load the same weights before the benchmark
         for worker in unbenched_workers:
-            if worker.master or worker.state == State.DISABLED:
+            if worker.master or worker.state in (State.DISABLED, State.UNAVAILABLE):
                 continue
 
             sync_thread = Thread(target=worker.load_options, args=(shared.opts.sd_model_checkpoint, shared.opts.sd_vae))
@@ -244,6 +244,10 @@ class World:
 
         # benchmark those that haven't been
         for worker in unbenched_workers:
+            if worker.state in (State.DISABLED, State.UNAVAILABLE):
+                logger.debug(f"worker '{worker.label}' is {worker.state}, refusing to benchmark")
+                continue
+
             t = Thread(target=benchmark_wrapped, args=(worker, ), name=f"{worker.label}_benchmark")
             benchmark_threads.append(t)
             t.start()
