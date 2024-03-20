@@ -685,16 +685,20 @@ class World:
                         'txt2img': [],
                         'img2img': []
                     }
-                    script_info = worker.session.get(url=worker.full_url('script-info')).json()
 
-                    for key in script_info:
-                        name = key.get('name', None)
+                    response = worker.session.get(url=worker.full_url('script-info'))
+                    if response.status_code == 200:
+                        script_info = response.json()
+                        for key in script_info:
+                            name = key.get('name', None)
 
-                        if name is not None:
-                            is_alwayson = key.get('is_alwayson', False)
-                            is_img2img = key.get('is_img2img', False)
-                            if is_alwayson:
-                                supported_scripts['img2img' if is_img2img else 'txt2img'].append(name)
+                            if name is not None:
+                                is_alwayson = key.get('is_alwayson', False)
+                                is_img2img = key.get('is_img2img', False)
+                                if is_alwayson:
+                                    supported_scripts['img2img' if is_img2img else 'txt2img'].append(name)
+                    else:
+                        logger.error(f"failed to query script-info for worker '{worker.label}': {response}")
                     worker.supported_scripts = supported_scripts
 
                     msg = f"worker '{worker.label}' is online"

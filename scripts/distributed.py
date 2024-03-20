@@ -178,7 +178,7 @@ class Script(scripts.Script):
                 images: json = job.worker.response["images"]
                 # if we for some reason get more than we asked for
                 if (job.batch_size * p.n_iter) < len(images):
-                    logger.debug(f"Requested {job.batch_size} image(s) from '{job.worker.label}', got {len(images)}")
+                    logger.debug(f"requested {job.batch_size} image(s) from '{job.worker.label}', got {len(images)}")
 
                 if donor_worker is None:
                     donor_worker = job.worker
@@ -262,8 +262,9 @@ class Script(scripts.Script):
                 # grab all controlnet units
                 cn_units = []
                 cn_args = p.script_args[script.args_from:script.args_to]
+
                 for cn_arg in cn_args:
-                    if type(cn_arg).__name__ == "UiControlNetUnit":
+                    if "ControlNetUnit" in type(cn_arg).__name__:
                         cn_units.append(cn_arg)
                 logger.debug(f"Detected {len(cn_units)} controlnet unit(s)")
 
@@ -301,8 +302,9 @@ class Script(scripts.Script):
         # TODO api for some reason returns 200 even if something failed to be set.
         #  for now we may have to make redundant GET requests to check if actually successful...
         #  https://github.com/AUTOMATIC1111/stable-diffusion-webui/issues/8146
+
         name = re.sub(r'\s?\[[^]]*]$', '', opts.data["sd_model_checkpoint"])
-        vae = opts.data["sd_vae"]
+        vae = opts.data.get('sd_vae')
         option_payload = {
             "sd_model_checkpoint": name,
             "sd_vae": vae
