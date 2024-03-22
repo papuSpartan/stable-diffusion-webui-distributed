@@ -3,6 +3,7 @@ from PIL import Image
 from modules.api.api import encode_pil_to_base64
 from scripts.spartan.shared import logger
 import numpy as np
+import json
 
 
 def np_to_b64(image: np.ndarray):
@@ -61,5 +62,11 @@ def pack_control_net(cn_units) -> dict:
         unit['save_detected_map'] = False
         # remove anything unserializable
         del unit['input_mode']
+
+    try:
+        json.dumps(controlnet)
+    except Exception as e:
+        logger.error(f"failed to serialize controlnet\nfirst unit:\n{controlnet['controlnet']['args'][0]}")
+        return {}
 
     return controlnet

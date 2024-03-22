@@ -18,6 +18,7 @@ from . import shared as sh
 from .pmodels import ConfigModel, Benchmark_Payload
 from .shared import logger, warmup_samples, extension_path
 from .worker import Worker, State
+import asyncio
 
 
 class NotBenchmarked(Exception):
@@ -231,37 +232,59 @@ class World:
                 else:
                     worker.benchmarked = True
 
+        tasks = []
+        loop = asyncio.new_event_loop()
         # have every unbenched worker load the same weights before the benchmark
         for worker in unbenched_workers:
             if worker.master or worker.state in (State.DISABLED, State.UNAVAILABLE):
                 continue
 
-            sync_thread = Thread(target=worker.load_options, args=(shared.opts.sd_model_checkpoint, shared.opts.sd_vae))
-            sync_threads.append(sync_thread)
-            sync_thread.start()
-        for thread in sync_threads:
-            thread.join()
+            tasks.append(
+                loop.create_task(
+                    asyncio.to_thread(worker.load_options, model=shared.opts.sd_model_checkpoint, vae=shared.opts.sd_vae)
+                    , name=worker.label
+                )
+            )
+        if len(tasks) > 0:
+            results = loop.run_until_complete(asyncio.wait(tasks))
+        for task in results[0]:
+            worker = self[task.get_name()]
+            response = task.result()
+            if response.status_code != 200:
+                logger.error(f"refusing to benchmark worker '{worker.label}' as it failed to load the selected model '{shared.opts.sd_model_checkpoint}'\n"
+                             f"*you may circumvent this by using the per-worker model override setting but this is not recommended as the same benchmark model should be used for all workers")
+                unbenched_workers = list(filter(lambda w: w != worker, unbenched_workers))
 
         # benchmark those that haven't been
+        tasks = []
         for worker in unbenched_workers:
             if worker.state in (State.DISABLED, State.UNAVAILABLE):
                 logger.debug(f"worker '{worker.label}' is {worker.state}, refusing to benchmark")
                 continue
 
-            t = Thread(target=benchmark_wrapped, args=(worker, ), name=f"{worker.label}_benchmark")
-            benchmark_threads.append(t)
-            t.start()
+            if worker.model_override is not None:
+                logger.warning(f"model override is enabled for worker '{worker.label}' which may result in poor optimization\n"
+                               f"*all workers should be evaluated against the same model")
+
+            tasks.append(
+                loop.create_task(
+                    asyncio.to_thread(benchmark_wrapped, worker),
+                    name=worker.label
+                )
+            )
             logger.info(f"benchmarking worker '{worker.label}'")
 
         # wait for all benchmarks to finish and update stats on newly benchmarked workers
-        if len(benchmark_threads) > 0:
-            for t in benchmark_threads:
-                t.join()
+        if len(tasks) > 0:
+            results = loop.run_until_complete(asyncio.wait(tasks))
             logger.info("benchmarking finished")
+            logger.debug(results)
 
             # save benchmark results to workers.json
             self.save_config()
             logger.info(self.speed_summary())
+
+        loop.close()
 
     def get_current_output_size(self) -> int:
         """

@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import copy
 import io
@@ -155,6 +156,11 @@ class Worker:
 
     def __repr__(self):
         return f"'{self.label}'@{self.address}:{self.port}, speed: {self.avg_ipm} ipm, state: {self.state}"
+
+    def __eq__(self, other):
+        if isinstance(other, Worker) and other.label == self.label:
+            return True
+        return False
 
     @property
     def model(self) -> Worker_Model:
@@ -510,7 +516,7 @@ class Worker:
         t: Thread
         samples = 2  # number of times to benchmark the remote / accuracy
 
-        if self.state == State.DISABLED or self.state == State.UNAVAILABLE:
+        if self.state in (State.DISABLED, State.UNAVAILABLE):
             logger.debug(f"worker '{self.label}' is unavailable or disabled, refusing to benchmark")
             return 0
 
@@ -533,7 +539,6 @@ class Worker:
         results: List[float] = []
         # it used to be lower for the first couple of generations
         # this was due to something torch does at startup according to auto and is now done at sdwui startup
-        self.state = State.WORKING
         for i in range(0, samples + warmup_samples):  # run some extra times so that the remote can "warm up"
             if self.state == State.UNAVAILABLE:
                 self.response = None
@@ -676,6 +681,8 @@ class Worker:
             self.loaded_model = model_name
             if vae is not None:
                 self.loaded_vae = vae
+
+        return response
 
     def restart(self) -> bool:
         err_msg = f"could not restart worker '{self.label}'"

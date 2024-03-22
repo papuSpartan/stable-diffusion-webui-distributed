@@ -312,7 +312,7 @@ class UI:
                         # API authentication
                         worker_api_auth_cbx = gradio.Checkbox(label='API Authentication')
                         worker_user_field = gradio.Textbox(label='Username')
-                        worker_password_field = gradio.Textbox(label='Password')
+                        worker_password_field = gradio.Textbox(label='Password', type='password')
                         update_credentials_btn = gradio.Button(value='Update API Credentials')
                         update_credentials_btn.click(self.update_credentials_btn, inputs=[
                             worker_api_auth_cbx,
