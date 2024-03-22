@@ -682,7 +682,9 @@ class Worker:
             if vae is not None:
                 self.loaded_vae = vae
 
-        return response
+            self.response = response
+
+        return self
 
     def restart(self) -> bool:
         err_msg = f"could not restart worker '{self.label}'"
