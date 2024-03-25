@@ -507,21 +507,22 @@ class Worker:
         self.jobs_requested += 1
         return
 
-    def benchmark(self) -> float:
+    def benchmark(self, sample_function: callable = None) -> float:
         """
         given a worker, run a small benchmark and return its performance in images/minute
         makes standard request(s) of 512x512 images and averages them to get the result
         """
 
         t: Thread
-        samples = 2  # number of times to benchmark the remote / accuracy
 
         if self.state in (State.DISABLED, State.UNAVAILABLE):
             logger.debug(f"worker '{self.label}' is unavailable or disabled, refusing to benchmark")
             return 0
 
         if self.master is True:
-            return -1
+            if sample_function is None:
+                logger.critical(f"no function provided for benchmarking master")
+                return -1
 
         def ipm(seconds: float) -> float:
             """
@@ -539,18 +540,24 @@ class Worker:
         results: List[float] = []
         # it used to be lower for the first couple of generations
         # this was due to something torch does at startup according to auto and is now done at sdwui startup
-        for i in range(0, samples + warmup_samples):  # run some extra times so that the remote can "warm up"
+        for i in range(0, sh.samples + warmup_samples):  # run some extra times so that the remote can "warm up"
             if self.state == State.UNAVAILABLE:
                 self.response = None
                 return 0
 
-            t = Thread(target=self.request, args=(dict(sh.benchmark_payload), None, False,),
-                       name=f"{self.label}_benchmark_request")
             try:  # if the worker is unreachable/offline then handle that here
-                t.start()
-                start = time.time()
-                t.join()
-                elapsed = time.time() - start
+                elapsed = None
+
+                if sample_function is None:
+                    start = time.time()
+                    t = Thread(target=self.request, args=(dict(sh.benchmark_payload), None, False,),
+                               name=f"{self.label}_benchmark_request")
+                    t.start()
+                    t.join()
+                    elapsed = time.time() - start
+                else:
+                    elapsed = sample_function()
+
                 sample_ipm = ipm(elapsed)
             except InvalidWorkerResponse as e:
                 raise e
@@ -563,10 +570,7 @@ class Worker:
                 logger.debug(f"{self.label} finished warming up\n")
 
         # average the sample results for accuracy
-        ipm_sum = 0
-        for ipm_result in results:
-            ipm_sum += ipm_result
-        avg_ipm_result = ipm_sum / samples
+        avg_ipm_result = sum(results) / sh.samples
 
         logger.debug(f"Worker '{self.label}' average ipm: {avg_ipm_result:.2f}")
         self.avg_ipm = avg_ipm_result

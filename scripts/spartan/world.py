@@ -19,6 +19,7 @@ from .pmodels import ConfigModel, Benchmark_Payload
 from .shared import logger, warmup_samples, extension_path
 from .worker import Worker, State
 import asyncio
+from modules.call_queue import wrap_queued_call
 
 
 class NotBenchmarked(Exception):
@@ -204,18 +205,31 @@ class World:
             t = Thread(target=worker.refresh_checkpoints, args=())
             t.start()
 
+    def sample_master(self) -> float:
+        # wrap our benchmark payload
+        master_bench_payload = StableDiffusionProcessingTxt2Img()
+        d = sh.benchmark_payload.dict()
+        for key in d:
+            setattr(master_bench_payload, key, d[key])
+
+        # Keeps from trying to save the images when we don't know the path. Also, there's not really any reason to.
+        master_bench_payload.do_not_save_samples = True
+        # shared.state.begin(job='distributed_master_bench')
+        wrapped = (wrap_queued_call(process_images))
+        start = time.time()
+        wrapped(master_bench_payload)
+        # wrap_gradio_gpu_call(process_images)(master_bench_payload)
+        # shared.state.end()
+
+        return time.time() - start
+
+
     def benchmark(self, rebenchmark: bool = False):
         """
         Attempts to benchmark all workers a part of the world.
         """
 
         unbenched_workers = []
-
-        def benchmark_wrapped(worker):
-            bench_func = worker.benchmark if not worker.master else self.benchmark_master
-            worker.avg_ipm = bench_func()
-            worker.benchmarked = True
-
         if rebenchmark:
             for worker in self._workers:
                 worker.benchmarked = False
@@ -230,7 +244,7 @@ class World:
                 else:
                     worker.benchmarked = True
 
-        with concurrent.futures.ThreadPoolExecutor() as executor:
+        with concurrent.futures.ThreadPoolExecutor(thread_name_prefix='distributed_benchmark') as executor:
             futures = []
 
             # have every unbenched worker load the same weights before the benchmark
@@ -262,7 +276,8 @@ class World:
                     logger.warning(f"model override is enabled for worker '{worker.label}' which may result in poor optimization\n"
                                    f"*all workers should be evaluated against the same model")
 
-                futures.append(executor.submit(benchmark_wrapped, worker))
+                chosen = worker.benchmark if not worker.master else worker.benchmark(sample_function=self.sample_master)
+                futures.append(executor.submit(chosen, worker))
                 logger.info(f"benchmarking worker '{worker.label}'")
 
             # wait for all benchmarks to finish and update stats on newly benchmarked workers
@@ -365,38 +380,6 @@ class World:
         lag = worker.batch_eta(payload=payload, quiet=True, batch_size=batch_size) - fastest_worker.batch_eta(payload=payload, quiet=True, batch_size=batch_size)
 
         return lag
-
-    def benchmark_master(self) -> float:
-        """
-        Benchmarks the local/master worker.
-
-        Returns:
-            float: Local worker speed in ipm
-        """
-
-        # wrap our benchmark payload
-        master_bench_payload = StableDiffusionProcessingTxt2Img()
-        d = sh.benchmark_payload.dict()
-        for key in d:
-            setattr(master_bench_payload, key, d[key])
-
-        # Keeps from trying to save the images when we don't know the path. Also, there's not really any reason to.
-        master_bench_payload.do_not_save_samples = True
-
-        # "warm up" due to initial generation lag
-        for _ in range(warmup_samples):
-            process_images(master_bench_payload)
-
-        # get actual sample
-        start = time.time()
-        process_images(master_bench_payload)
-        elapsed = time.time() - start
-
-        ipm = sh.benchmark_payload.batch_size / (elapsed / 60)
-
-        logger.debug(f"Master benchmark took {elapsed:.2f}: {ipm:.2f} ipm")
-        self.master().benchmarked = True
-        return ipm
 
     def update_jobs(self):
         """creates initial jobs (before optimization) """
