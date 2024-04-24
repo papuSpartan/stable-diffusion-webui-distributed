@@ -342,6 +342,8 @@ class Script(scripts.Script):
                 prior_images += j.batch_size * p.n_iter
 
             payload_temp['batch_size'] = job.batch_size
+            if job.step_override is not None:
+                payload_temp['steps'] = job.step_override
             payload_temp['subseed'] += prior_images
             payload_temp['seed'] += prior_images if payload_temp['subseed_strength'] == 0 else 0
             logger.debug(

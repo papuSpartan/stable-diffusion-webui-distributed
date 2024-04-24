@@ -50,6 +50,7 @@ class Job:
         self.worker: Worker = worker
         self.batch_size: int = batch_size
         self.complementary: bool = False
+        self.step_override = None
 
     def __str__(self):
         prefix = ''
@@ -194,16 +195,14 @@ class World:
             if worker.master:
                 continue
 
-            t = Thread(target=worker.interrupt, args=())
-            t.start()
+            Thread(target=worker.interrupt, args=()).start()
 
     def refresh_checkpoints(self):
         for worker in self.get_workers():
             if worker.master:
                 continue
 
-            t = Thread(target=worker.refresh_checkpoints, args=())
-            t.start()
+            Thread(target=worker.refresh_checkpoints, args=()).start()
 
     def sample_master(self) -> float:
         # wrap our benchmark payload
@@ -377,7 +376,7 @@ class World:
         if worker == fastest_worker:
             return 0
 
-        lag = worker.batch_eta(payload=payload, quiet=True, batch_size=batch_size) - fastest_worker.batch_eta(payload=payload, quiet=True, batch_size=batch_size)
+        lag = worker.eta(payload=payload, quiet=True, batch_size=batch_size) - fastest_worker.eta(payload=payload, quiet=True, batch_size=batch_size)
 
         return lag
 
@@ -518,11 +517,11 @@ class World:
                 fastest_active = self.fastest_realtime_job().worker
                 for j in self.jobs:
                     if j.worker.label == fastest_active.label:
-                        slack_time = fastest_active.batch_eta(payload=payload, batch_size=j.batch_size) + self.job_timeout
+                        slack_time = fastest_active.eta(payload=payload, batch_size=j.batch_size) + self.job_timeout
                 logger.debug(f"There's {slack_time:.2f}s of slack time available for worker '{job.worker.label}'")
 
                 # see how long it would take to produce only 1 image on this complementary worker
-                secs_per_batch_image = job.worker.batch_eta(payload=payload, batch_size=1)
+                secs_per_batch_image = job.worker.eta(payload=payload, batch_size=1)
                 num_images_compensate = int(slack_time / secs_per_batch_image)
                 logger.debug(
                     f"worker '{job.worker.label}':\n"
@@ -535,6 +534,21 @@ class World:
                     request_img_size = payload['width'] * payload['height']
                     max_images = job.worker.pixel_cap // request_img_size
                     job.add_work(payload, batch_size=max_images)
+
+                # when not even a singular image can be squeezed out
+                # if step scaling is enabled, then find how many samples would be considered realtime and adjust
+                if num_images_compensate == 0:
+                    seconds_per_sample = job.worker.eta(payload=payload, batch_size=1, samples=1)
+                    realtime_samples = slack_time // seconds_per_sample
+                    logger.critical(
+                        f"job for '{job.worker.label}' downscaled to {realtime_samples} samples to meet time constraints\n"
+                        f"{realtime_samples:.0f} samples = {slack_time:.2f}s slack ÷ {seconds_per_sample:.2f}s/sample\n"
+                        f"  step reduction: {payload['steps']} -> {realtime_samples:.0f}"
+                    )
+
+                    job.add_work(payload=payload, batch_size=1)
+                    job.step_override = realtime_samples
+
         else:
             logger.debug("complementary image production is disabled")
 

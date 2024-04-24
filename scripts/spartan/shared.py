@@ -61,7 +61,7 @@ logger.addHandler(gui_handler)
 # end logging
 
 warmup_samples = 2  # number of samples to do before recording a valid benchmark sample
-samples = 2  # number of times to benchmark worker after warmup benchmarks are completed
+samples = 4  # number of times to benchmark worker after warmup benchmarks are completed
 
 
 class BenchmarkPayload(BaseModel):

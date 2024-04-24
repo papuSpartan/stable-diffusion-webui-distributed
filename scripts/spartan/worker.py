@@ -195,14 +195,14 @@ class Worker:
         protocol = 'http' if not self.tls else 'https'
         return f"{protocol}://{self.__str__()}/sdapi/v1/{route}"
 
-    def batch_eta_hr(self, payload: dict) -> float:
+    def eta_hr(self, payload: dict) -> float:
         """
         takes a normal payload and returns the eta of a pseudo payload which mirrors the hr-fix parameters
         This returns the eta of how long it would take to run hr-fix on the original image
         """
 
         pseudo_payload = copy.copy(payload)
-        pseudo_payload['enable_hr'] = False  # prevent overflow in self.batch_eta
+        pseudo_payload['enable_hr'] = False  # prevent overflow in self.eta
         res_ratio = pseudo_payload['hr_scale']
         original_steps = pseudo_payload['steps']
         second_pass_steps = pseudo_payload['hr_second_pass_steps']
@@ -218,12 +218,11 @@ class Worker:
         pseudo_payload['width'] = pseudo_width
         pseudo_payload['height'] = pseudo_height
 
-        eta = self.batch_eta(payload=pseudo_payload, quiet=True)
-        return eta
+        return self.eta(payload=pseudo_payload, quiet=True)
 
-    def batch_eta(self, payload: dict, quiet: bool = False, batch_size: int = None) -> float:
+    def eta(self, payload: dict, quiet: bool = False, batch_size: int = None, samples: int = None) -> float:
         """
-            estimate how long it will take to generate <batch_size> images on a worker in seconds
+            estimate how long it will take to generate image(s) on a worker in seconds
 
             Args:
                 payload: Sdwui api formatted payload
@@ -231,7 +230,7 @@ class Worker:
                 batch_size: Overrides the batch_size parameter of the payload
         """
 
-        steps = payload['steps']
+        steps = payload['steps'] if samples is None else samples
         num_images = payload['batch_size'] if batch_size is None else batch_size
 
         # if worker has not yet been benchmarked then
@@ -243,7 +242,7 @@ class Worker:
         # show effect of high-res fix
         hr = payload.get('enable_hr', False)
         if hr:
-            eta += self.batch_eta_hr(payload=payload)
+            eta += self.eta_hr(payload=payload)
 
         # show effect of image size
         real_pix_to_benched = (payload['width'] * payload['height']) \
@@ -337,7 +336,7 @@ class Worker:
                 self.load_options(model=option_payload['sd_model_checkpoint'], vae=option_payload['sd_vae'])
 
             if self.benchmarked:
-                eta = self.batch_eta(payload=payload) * payload['n_iter']
+                eta = self.eta(payload=payload) * payload['n_iter']
                 logger.debug(f"worker '{self.label}' predicts it will take {eta:.3f}s to generate "
                              f"{payload['batch_size'] * payload['n_iter']} image(s) "
                              f"at a speed of {self.avg_ipm:.2f} ipm\n")
@@ -519,10 +518,9 @@ class Worker:
             logger.debug(f"worker '{self.label}' is unavailable or disabled, refusing to benchmark")
             return 0
 
-        if self.master is True:
-            if sample_function is None:
-                logger.critical(f"no function provided for benchmarking master")
-                return -1
+        if self.master and sample_function is None:
+            logger.critical(f"no function provided for benchmarking master")
+            return -1
 
         def ipm(seconds: float) -> float:
             """
@@ -548,7 +546,7 @@ class Worker:
             try:  # if the worker is unreachable/offline then handle that here
                 elapsed = None
 
-                if sample_function is None:
+                if not callable(sample_function):
                     start = time.time()
                     t = Thread(target=self.request, args=(dict(sh.benchmark_payload), None, False,),
                                name=f"{self.label}_benchmark_request")
