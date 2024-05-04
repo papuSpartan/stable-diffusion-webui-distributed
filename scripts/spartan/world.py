@@ -99,6 +99,7 @@ class World:
         self.enabled = True
         self.is_dropdown_handler_injected = False
         self.complement_production = True
+        self.step_scaling = False
 
     def __getitem__(self, label: str) -> Worker:
         for worker in self._workers:
@@ -537,7 +538,7 @@ class World:
 
                 # when not even a singular image can be squeezed out
                 # if step scaling is enabled, then find how many samples would be considered realtime and adjust
-                if num_images_compensate == 0:
+                if num_images_compensate == 0 and self.step_scaling:
                     seconds_per_sample = job.worker.eta(payload=payload, batch_size=1, samples=1)
                     realtime_samples = slack_time // seconds_per_sample
                     logger.critical(
@@ -651,6 +652,7 @@ class World:
         self.job_timeout = config.job_timeout
         self.enabled = config.enabled
         self.complement_production = config.complement_production
+        self.step_scaling = config.step_reduction
 
         logger.debug("config loaded")
 
@@ -664,7 +666,8 @@ class World:
             benchmark_payload=sh.benchmark_payload,
             job_timeout=self.job_timeout,
             enabled=self.enabled,
-            complement_production=self.complement_production
+            complement_production=self.complement_production,
+            step_scaling=self.step_scaling
         )
 
         with open(self.config_path, 'w+') as config_file:

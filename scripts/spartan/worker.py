@@ -574,6 +574,7 @@ class Worker:
         self.avg_ipm = avg_ipm_result
         self.response = None
         self.benchmarked = True
+        self.eta_percent_error = []  # likely inaccurate after rebenching
         self.state = State.IDLE
         return avg_ipm_result
 

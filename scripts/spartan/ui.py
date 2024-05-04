@@ -81,7 +81,7 @@ class UI:
 
         return 'No active jobs!', worker_status, logs
 
-    def save_btn(self, thin_client_mode, job_timeout, complement_production):
+    def save_btn(self, thin_client_mode, job_timeout, complement_production, step_scaling):
         """updates the options visible on the settings tab"""
 
         self.world.thin_client_mode = thin_client_mode
@@ -90,6 +90,7 @@ class UI:
         self.world.job_timeout = job_timeout
         logger.debug(f"job timeout is now {job_timeout} seconds")
         self.world.complement_production = complement_production
+        self.world.step_scaling = step_scaling
         self.world.save_config()
 
     def save_worker_btn(self, label, address, port, tls, disabled):
@@ -365,13 +366,21 @@ class UI:
 
                     complement_production = gradio.Checkbox(
                         label='Complement production',
-                        info='Prevents under-utilization of hardware by requesting additional images',
+                        info='Prevents under-utilization by requesting additional images when possible',
                         value=self.world.complement_production
                     )
 
+                    # reduces image quality the more the sample-count must be reduced
+                    # good for mixed setups where each worker may not be around the same speed
+                    step_scaling = gradio.Checkbox(
+                        label='Step scaling',
+                        info='Prevents under-utilization via sample reduction in order to meet time constraints',
+                        value=self.world.step_scaling
+                    )
+
                     save_btn = gradio.Button(value='Update')
-                    save_btn.click(fn=self.save_btn, inputs=[thin_client_cbx, job_timeout, complement_production])
-                    components += [thin_client_cbx, job_timeout, complement_production, save_btn]
+                    save_btn.click(fn=self.save_btn, inputs=[thin_client_cbx, job_timeout, complement_production, step_scaling])
+                    components += [thin_client_cbx, job_timeout, complement_production, step_scaling, save_btn]
 
                 with gradio.Tab('Help'):
                     gradio.Markdown(
