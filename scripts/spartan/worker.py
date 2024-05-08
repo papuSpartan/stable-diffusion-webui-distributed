@@ -618,6 +618,10 @@ class Worker:
         except requests.exceptions.ConnectionError as e:
             logger.error(e)
             return False
+        except requests.ReadTimeout as e:
+            logger.critical(f"worker '{self.label}' is online but not responding (crashed?)")
+            logger.error(e)
+            return False
 
     def mark_unreachable(self):
         if self.state == State.DISABLED:

@@ -235,6 +235,7 @@ class Script(scripts.Script):
 
         try:
             Script.world.initialize(batch_size)
+            Script.world.initial_payload = initial_payload
             logger.debug(f"World initialized!")
         except WorldAlreadyInitialized:
             Script.world.update_world(total_batch_size=batch_size)
@@ -248,6 +249,9 @@ class Script(scripts.Script):
 
         current_thread().name = "distributed_main"
         Script.initialize(initial_payload=p)
+
+        # save original process_images_inner function for later if we monkeypatch it
+        Script.original_process_images_inner = processing.process_images_inner
 
         # strip scripts that aren't yet supported and warn user
         packed_script_args: List[dict] = []  # list of api formatted per-script argument objects
@@ -387,8 +391,11 @@ class Script(scripts.Script):
         if not Script.world.enabled:
             return
 
-        if len(processed.images) >= 1 and Script.master_start is not None:
+        if Script.master_start is not None:
             Script.add_to_gallery(p=p, processed=processed)
+
+        # restore process_images_inner if it was monkey-patched
+        processing.process_images_inner = Script.original_process_images_inner
 
     @staticmethod
     def signal_handler(sig, frame):

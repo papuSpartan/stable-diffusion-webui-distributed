@@ -354,8 +354,8 @@ class UI:
 
                 with gradio.Tab('Settings'):
                     thin_client_cbx = gradio.Checkbox(
-                        label='Thin-client mode (experimental)',
-                        info="(BROKEN) Only generate images using remote workers. There will be no previews when enabled.",
+                        label='Thin-client mode',
+                        info="Only generate images using remote workers. There will be no previews (yet) when enabled.",
                         value=self.world.thin_client_mode
                     )
                     job_timeout = gradio.Number(

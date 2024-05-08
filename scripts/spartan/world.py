@@ -18,8 +18,8 @@ from . import shared as sh
 from .pmodels import ConfigModel, Benchmark_Payload
 from .shared import logger, warmup_samples, extension_path
 from .worker import Worker, State
-import asyncio
 from modules.call_queue import wrap_queued_call
+from modules import processing
 
 
 class NotBenchmarked(Exception):
@@ -564,6 +564,22 @@ class World:
         for job in self.jobs:
             distro_summary += f"'{job.worker.label}' - {job.batch_size * iterations} image(s) @ {job.worker.avg_ipm:.2f} ipm\n"
         logger.info(distro_summary)
+
+        if self.thin_client_mode is True or self.master_job().batch_size == 0:
+            # save original process_images_inner for later so we can restore once we're done
+            logger.debug(f"bypassing local generation completely")
+            def process_images_inner_bypass(p) -> processing.Processed:
+                processed = processing.Processed(p, [], p.seed, info="")
+                processed.all_prompts = []
+                processed.all_seeds = []
+                processed.all_subseeds = []
+                processed.all_negative_prompts = []
+                processed.infotexts = []
+                processed.prompt = None
+
+                self.initial_payload.scripts.postprocess(p, processed)
+                return processed
+            processing.process_images_inner = process_images_inner_bypass
 
         # delete any jobs that have no work
         last = len(self.jobs) - 1
