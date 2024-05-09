@@ -30,13 +30,6 @@ class NotBenchmarked(Exception):
     pass
 
 
-class WorldAlreadyInitialized(Exception):
-    """
-    Raised when attempting to initialize the World when it has already been initialized.
-    """
-    pass
-
-
 class Job:
     """
     Keeps track of how much work a given worker should handle.
@@ -78,7 +71,7 @@ class World:
     The frame or "world" which holds all workers (including the local machine).
 
     Args:
-        initial_payload: The original txt2img payload created by the user initiating the generation request on master.
+        p: The original processing state object created by the user initiating the generation request on master.
         verify_remotes (bool): Whether to validate remote worker certificates.
     """
 
@@ -86,15 +79,14 @@ class World:
     config_path = shared.cmd_opts.distributed_config
     old_config_path = worker_info_path = extension_path.joinpath('workers.json')
 
-    def __init__(self, initial_payload, verify_remotes: bool = True):
+    def __init__(self, verify_remotes: bool = True):
+        self.p = None
         self.master_worker = Worker(master=True)
-        self.total_batch_size: int = 0
         self._workers: List[Worker] = [self.master_worker]
         self.jobs: List[Job] = []
         self.job_timeout: int = 3  # seconds
         self.initialized: bool = False
         self.verify_remotes = verify_remotes
-        self.initial_payload = copy.copy(initial_payload)
         self.thin_client_mode = False
         self.enabled = True
         self.is_dropdown_handler_injected = False
@@ -109,32 +101,12 @@ class World:
     def __repr__(self):
         return f"{len(self._workers)} workers"
 
-    def update_world(self, total_batch_size):
-        """
-        Updates the world with information vital to handling the local generation request after
-            the world has already been initialized.
-
-        Args:
-            total_batch_size (int): The total number of images requested by the local/master sdwui instance.
-        """
-
-        self.total_batch_size = total_batch_size
-        self.update_jobs()
-
-    def initialize(self, total_batch_size):
-        """should be called before a world instance is used for anything"""
-        if self.initialized:
-            raise WorldAlreadyInitialized("This world instance was already initialized")
-
-        self.benchmark()
-        self.update_world(total_batch_size=total_batch_size)
-        self.initialized = True
 
     def default_batch_size(self) -> int:
         """the amount of images/total images requested that a worker would compute if conditions were perfect and
         each worker generated at the same speed. assumes one batch only"""
 
-        return self.total_batch_size // self.size()
+        return self.p.batch_size // self.size()
 
     def size(self) -> int:
         """
@@ -396,6 +368,18 @@ class World:
 
                 self.jobs.append(Job(worker=worker, batch_size=batch_size))
 
+    def update(self, p):
+        """preps world for another run"""
+        if not self.initialized:
+            self.benchmark()
+            self.initialized = True
+            logger.debug("world initialized!")
+        else:
+            logger.debug("world was already initialized")
+
+        self.p = p
+        self.update_jobs()
+
     def get_workers(self):
         filtered: List[Worker] = []
         for worker in self._workers:
@@ -431,7 +415,7 @@ class World:
 
             logger.debug(f"worker '{job.worker.label}' would stall the image gallery by ~{lag:.2f}s\n")
             job.complementary = True
-            if deferred_images + images_checked + payload['batch_size'] > self.total_batch_size:
+            if deferred_images + images_checked + payload['batch_size'] > self.p.batch_size:
                 logger.debug(f"would go over actual requested size")
             else:
                 deferred_images += payload['batch_size']
@@ -474,9 +458,9 @@ class World:
         #######################
 
         # when total number of requested images was not cleanly divisible by world size then we tack the remainder on
-        remainder_images = self.total_batch_size - self.get_current_output_size()
+        remainder_images = self.p.batch_size - self.get_current_output_size()
         if remainder_images >= 1:
-            logger.debug(f"The requested number of images({self.total_batch_size}) was not cleanly divisible by the number of realtime nodes({len(self.realtime_jobs())}) resulting in {remainder_images} that will be redistributed")
+            logger.debug(f"The requested number of images({self.p.batch_size}) was not cleanly divisible by the number of realtime nodes({len(self.realtime_jobs())}) resulting in {remainder_images} that will be redistributed")
 
             realtime_jobs = self.realtime_jobs()
             realtime_jobs.sort(key=lambda x: x.batch_size)
@@ -555,9 +539,9 @@ class World:
 
         iterations = payload['n_iter']
         num_returning = self.get_current_output_size()
-        num_complementary = num_returning - self.total_batch_size
+        num_complementary = num_returning - self.p.batch_size
         distro_summary = "Job distribution:\n"
-        distro_summary += f"{self.total_batch_size} * {iterations} iteration(s)"
+        distro_summary += f"{self.p.batch_size} * {iterations} iteration(s)"
         if num_complementary > 0:
             distro_summary += f" + {num_complementary} complementary"
         distro_summary += f": {num_returning} images total\n"
@@ -577,7 +561,7 @@ class World:
                 processed.infotexts = []
                 processed.prompt = None
 
-                self.initial_payload.scripts.postprocess(p, processed)
+                self.p.scripts.postprocess(p, processed)
                 return processed
             processing.process_images_inner = process_images_inner_bypass
 

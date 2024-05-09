@@ -24,13 +24,12 @@ from modules.shared import state as webui_state
 from scripts.spartan.control_net import pack_control_net
 from scripts.spartan.shared import logger
 from scripts.spartan.ui import UI
-from scripts.spartan.world import World, WorldAlreadyInitialized
+from scripts.spartan.world import World
 
 old_sigint_handler = signal.getsignal(signal.SIGINT)
 old_sigterm_handler = signal.getsignal(signal.SIGTERM)
 
 
-# TODO implement advertisement of some sort in sdwui api to allow extension to automatically discover workers?
 # noinspection PyMissingOrEmptyDocstring
 class Script(scripts.Script):
     worker_threads: List[Thread] = []
@@ -50,17 +49,8 @@ class Script(scripts.Script):
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     # build world
-    world = World(initial_payload=None, verify_remotes=verify_remotes)
-    # add workers to the world
+    world = World(verify_remotes=verify_remotes)
     world.load_config()
-    if cmd_opts.distributed_remotes is not None and len(cmd_opts.distributed_remotes) > 0:
-        logger.warning(f"--distributed-remotes is deprecated and may be removed in the future\n"
-                       f"gui/external modification of {world.config_path} will be prioritized going forward")
-
-        for worker in cmd_opts.distributed_remotes:
-            world.add_worker(uuid=worker[0], address=worker[1], port=worker[2], tls=False)
-        world.save_config()
-    # do an early check to see which workers are online
     logger.info("doing initial ping sweep to see which workers are reachable")
     world.ping_remotes(indiscriminate=True)
 
@@ -71,7 +61,7 @@ class Script(scripts.Script):
         return scripts.AlwaysVisible
 
     def ui(self, is_img2img):
-        self.world.load_config()
+        Script.world.load_config()
         extension_ui = UI(script=Script, world=Script.world)
         # root, api_exposed = extension_ui.create_ui()
         components = extension_ui.create_ui()
@@ -128,7 +118,7 @@ class Script(scripts.Script):
             if p.n_iter > 1:  # if splitting by batch count
                 num_remote_images *= p.n_iter - 1
 
-            logger.debug(f"image {true_image_pos + 1}/{Script.world.total_batch_size * p.n_iter}, "
+            logger.debug(f"image {true_image_pos + 1}/{Script.world.p.batch_size * p.n_iter}, "
                          f"info-index: {info_index}")
 
             if Script.world.thin_client_mode:
@@ -225,30 +215,15 @@ class Script(scripts.Script):
         p.batch_size = len(processed.images)
         return
 
-    @staticmethod
-    def initialize(initial_payload):
-        # get default batch size
-        try:
-            batch_size = initial_payload.batch_size
-        except AttributeError:
-            batch_size = 1
-
-        try:
-            Script.world.initialize(batch_size)
-            Script.world.initial_payload = initial_payload
-            logger.debug(f"World initialized!")
-        except WorldAlreadyInitialized:
-            Script.world.update_world(total_batch_size=batch_size)
 
     # p's type is
-    # "modules.processing.StableDiffusionProcessingTxt2Img"
-    def before_process(self, p, *args):
-        if not self.world.enabled:
+    # "modules.processing.StableDiffusionProcessing*"
+    @staticmethod
+    def before_process(p, *args):
+        if not Script.world.enabled:
             logger.debug("extension is disabled")
             return
-
-        current_thread().name = "distributed_main"
-        Script.initialize(initial_payload=p)
+        Script.world.update(p)
 
         # save original process_images_inner function for later if we monkeypatch it
         Script.original_process_images_inner = processing.process_images_inner
@@ -367,22 +342,12 @@ class Script(scripts.Script):
             started_jobs.append(job)
 
         # if master batch size was changed again due to optimization change it to the updated value
-        if not self.world.thin_client_mode:
+        if not Script.world.thin_client_mode:
             p.batch_size = Script.world.master_job().batch_size
         Script.master_start = time.time()
 
         # generate images assigned to local machine
         p.do_not_save_grid = True  # don't generate grid from master as we are doing this later.
-        if Script.world.thin_client_mode:
-            p.batch_size = 0
-            processed = Processed(p=p, images_list=[])
-            processed.all_prompts = []
-            processed.all_seeds = []
-            processed.all_subseeds = []
-            processed.all_negative_prompts = []
-            processed.infotexts = []
-            processed.prompt = None
-
         Script.runs_since_init += 1
         return
 
