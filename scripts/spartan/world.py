@@ -16,7 +16,7 @@ import modules.shared as shared
 from modules.processing import process_images, StableDiffusionProcessingTxt2Img
 from . import shared as sh
 from .pmodels import ConfigModel, Benchmark_Payload
-from .shared import logger, warmup_samples, extension_path
+from .shared import logger, extension_path
 from .worker import Worker, State
 from modules.call_queue import wrap_queued_call
 from modules import processing

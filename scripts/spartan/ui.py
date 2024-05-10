@@ -14,8 +14,7 @@ worker_select_dropdown = None
 class UI:
     """extension user interface related things"""
 
-    def __init__(self, script, world):
-        self.script = script
+    def __init__(self, world):
         self.world = world
         self.original_model_dropdown_handler = opts.data_labels.get('sd_model_checkpoint').onchange
 
