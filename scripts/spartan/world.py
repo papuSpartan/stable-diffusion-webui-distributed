@@ -353,7 +353,7 @@ class World:
 
         return lag
 
-    def update_jobs(self):
+    def make_jobs(self):
         """creates initial jobs (before optimization) """
 
         # clear jobs if this is not the first time running
@@ -367,6 +367,7 @@ class World:
                     worker.benchmark()
 
                 self.jobs.append(Job(worker=worker, batch_size=batch_size))
+                logger.debug(f"added job for worker {worker.label}")
 
     def update(self, p):
         """preps world for another run"""
@@ -378,7 +379,7 @@ class World:
             logger.debug("world was already initialized")
 
         self.p = p
-        self.update_jobs()
+        self.make_jobs()
 
     def get_workers(self):
         filtered: List[Worker] = []
@@ -525,7 +526,7 @@ class World:
                 if num_images_compensate == 0 and self.step_scaling:
                     seconds_per_sample = job.worker.eta(payload=payload, batch_size=1, samples=1)
                     realtime_samples = slack_time // seconds_per_sample
-                    logger.critical(
+                    logger.debug(
                         f"job for '{job.worker.label}' downscaled to {realtime_samples} samples to meet time constraints\n"
                         f"{realtime_samples:.0f} samples = {slack_time:.2f}s slack ÷ {seconds_per_sample:.2f}s/sample\n"
                         f"  step reduction: {payload['steps']} -> {realtime_samples:.0f}"
@@ -652,7 +653,7 @@ class World:
         self.job_timeout = config.job_timeout
         self.enabled = config.enabled
         self.complement_production = config.complement_production
-        self.step_scaling = config.step_reduction
+        self.step_scaling = config.step_scaling
 
         logger.debug("config loaded")
 

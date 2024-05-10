@@ -10,7 +10,7 @@ import re
 import signal
 import sys
 import time
-from threading import Thread, current_thread
+from threading import Thread
 from typing import List
 import gradio
 import urllib3
@@ -330,7 +330,8 @@ class Script(scripts.Script):
             payload_temp['seed'] += prior_images if payload_temp['subseed_strength'] == 0 else 0
             logger.debug(
                 f"'{job.worker.label}' job's given starting seed is "
-                f"{payload_temp['seed']} with {prior_images} coming before it")
+                f"{payload_temp['seed']} with {prior_images} coming before it"
+            )
 
             if job.worker.loaded_model != name or job.worker.loaded_vae != vae:
                 sync = True

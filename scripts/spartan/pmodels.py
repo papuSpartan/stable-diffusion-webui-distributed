@@ -42,4 +42,4 @@ class ConfigModel(BaseModel):
     job_timeout: Optional[int] = Field(default=3)
     enabled: Optional[bool] = Field(description="Whether the extension as a whole should be active or disabled", default=True)
     complement_production: Optional[bool] = Field(description="Whether to generate complementary images to prevent under-utilizing hardware", default=True)
-    step_reduction: Optional[bool] = Field(description="Whether to downscale requested steps in order to meet time constraints")
+    step_scaling: Optional[bool] = Field(description="Whether to downscale requested steps in order to meet time constraints", default=False)

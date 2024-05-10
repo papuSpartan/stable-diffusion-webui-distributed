@@ -85,10 +85,8 @@ class UI:
         """updates the options visible on the settings tab"""
 
         self.world.thin_client_mode = thin_client_mode
-        logger.debug(f"thin client mode is now {thin_client_mode}")
         job_timeout = int(job_timeout)
         self.world.job_timeout = job_timeout
-        logger.debug(f"job timeout is now {job_timeout} seconds")
         self.world.complement_production = complement_production
         self.world.step_scaling = step_scaling
         self.world.save_config()
@@ -216,7 +214,6 @@ class UI:
                     interactive=True
                 )
                 main_toggle.input(self.main_toggle_btn)
-                setattr(main_toggle, 'do_not_save_to_config', True)  # ui_loadsave.py apply_field()
                 components.append(main_toggle)
 
                 with gradio.Tab('Status') as status_tab:
@@ -355,13 +352,13 @@ class UI:
                 with gradio.Tab('Settings'):
                     thin_client_cbx = gradio.Checkbox(
                         label='Thin-client mode',
-                        info="Only generate images using remote workers. There will be no previews (yet) when enabled.",
+                        info="Only generate images remotely (no image previews yet)",
                         value=self.world.thin_client_mode
                     )
                     job_timeout = gradio.Number(
                         label='Job timeout', value=self.world.job_timeout,
                         info="Seconds until a worker is considered too slow to be assigned an"
-                             " equal share of the total request. Longer than 2 seconds is recommended."
+                             " equal share of the total request. Longer than 2 seconds is recommended"
                     )
 
                     complement_production = gradio.Checkbox(
@@ -390,4 +387,7 @@ class UI:
                         """
                     )
 
+            # prevent wui from overriding any values
+            for component in components:
+                setattr(component, 'do_not_save_to_config', True)  # ui_loadsave.py apply_field()
             return components
