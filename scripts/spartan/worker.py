@@ -688,7 +688,7 @@ class Worker:
             if vae is not None:
                 self.loaded_vae = vae
 
-            self.response = response
+        self.response = response
 
         return self
 
