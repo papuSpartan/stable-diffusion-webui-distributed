@@ -145,6 +145,14 @@ class World:
             Worker: The worker object.
         """
 
+        # protect against user trying to make cyclical setups and connections
+        is_master = kwargs.get('master')
+        if is_master is None or not is_master:
+            m = self.master()
+            if kwargs['address'] == m.address and kwargs['port'] == m.port:
+                logger.error(f"refusing to add worker {kwargs['label']} as its socket definition({m.address}:{m.port}) matches master")
+                return None
+
         original = self[kwargs['label']]  # if worker doesn't already exist then just make a new one
         if original is None:
             new = Worker(**kwargs)
