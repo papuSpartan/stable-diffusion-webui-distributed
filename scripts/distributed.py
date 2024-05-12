@@ -62,9 +62,6 @@ class DistributedScript(scripts.Script):
         return scripts.AlwaysVisible
 
     def ui(self, is_img2img):
-        if not is_img2img:  # prevents loading twice for no reason
-            self.world.load_config()
-
         extension_ui = UI(world=self.world)
         # root, api_exposed = extension_ui.create_ui()
         components = extension_ui.create_ui()
