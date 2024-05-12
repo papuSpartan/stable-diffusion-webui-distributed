@@ -10,7 +10,7 @@ import re
 import signal
 import sys
 import time
-from threading import Thread, current_thread
+from threading import Thread
 from typing import List
 import gradio
 import urllib3
@@ -18,28 +18,24 @@ from PIL import Image
 from modules import processing
 from modules import scripts
 from modules.images import save_image
-from modules.processing import fix_seed, Processed
+from modules.processing import fix_seed
 from modules.shared import opts, cmd_opts
 from modules.shared import state as webui_state
 from scripts.spartan.control_net import pack_control_net
 from scripts.spartan.shared import logger
 from scripts.spartan.ui import UI
-from scripts.spartan.world import World, WorldAlreadyInitialized
+from scripts.spartan.world import World
 
 old_sigint_handler = signal.getsignal(signal.SIGINT)
 old_sigterm_handler = signal.getsignal(signal.SIGTERM)
 
 
-# TODO implement advertisement of some sort in sdwui api to allow extension to automatically discover workers?
 # noinspection PyMissingOrEmptyDocstring
-class Script(scripts.Script):
+class DistributedScript(scripts.Script):
+    # global old_sigterm_handler, old_sigterm_handler
     worker_threads: List[Thread] = []
     # Whether to verify worker certificates. Can be useful if your remotes are self-signed.
     verify_remotes = not cmd_opts.distributed_skip_verify_remotes
-
-    is_img2img = True
-    is_txt2img = True
-    alwayson = True
     master_start = None
     runs_since_init = 0
     name = "distributed"
@@ -50,19 +46,14 @@ class Script(scripts.Script):
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     # build world
-    world = World(initial_payload=None, verify_remotes=verify_remotes)
-    # add workers to the world
+    world = World(verify_remotes=verify_remotes)
     world.load_config()
-    if cmd_opts.distributed_remotes is not None and len(cmd_opts.distributed_remotes) > 0:
-        logger.warning(f"--distributed-remotes is deprecated and may be removed in the future\n"
-                       f"gui/external modification of {world.config_path} will be prioritized going forward")
-
-        for worker in cmd_opts.distributed_remotes:
-            world.add_worker(uuid=worker[0], address=worker[1], port=worker[2], tls=False)
-        world.save_config()
-    # do an early check to see which workers are online
     logger.info("doing initial ping sweep to see which workers are reachable")
     world.ping_remotes(indiscriminate=True)
+
+    # constructed for both txt2img and img2img
+    def __init__(self):
+        super().__init__()
 
     def title(self):
         return "Distribute"
@@ -71,21 +62,18 @@ class Script(scripts.Script):
         return scripts.AlwaysVisible
 
     def ui(self, is_img2img):
-        self.world.load_config()
-        extension_ui = UI(script=Script, world=Script.world)
+        extension_ui = UI(world=self.world)
         # root, api_exposed = extension_ui.create_ui()
         components = extension_ui.create_ui()
 
         # The first injection of handler for the models dropdown(sd_model_checkpoint) which is often present
         # in the quick-settings bar of a user. Helps ensure model swaps propagate to all nodes ASAP.
-        Script.world.inject_model_dropdown_handler()
+        self.world.inject_model_dropdown_handler()
         # return some components that should be exposed to the api
         return components
 
-    @staticmethod
-    def add_to_gallery(processed, p):
+    def add_to_gallery(self, processed, p):
         """adds generated images to the image gallery after waiting for all workers to finish"""
-        webui_state.textinfo = "Distributed - injecting images"
 
         def processed_inject_image(image, info_index, save_path_override=None, grid=False, response=None):
             image_params: json = response['parameters']
@@ -129,10 +117,10 @@ class Script(scripts.Script):
             if p.n_iter > 1:  # if splitting by batch count
                 num_remote_images *= p.n_iter - 1
 
-            logger.debug(f"image {true_image_pos + 1}/{Script.world.total_batch_size * p.n_iter}, "
+            logger.debug(f"image {true_image_pos + 1}/{self.world.p.batch_size * p.n_iter}, "
                          f"info-index: {info_index}")
 
-            if Script.world.thin_client_mode:
+            if self.world.thin_client_mode:
                 p.all_negative_prompts = processed.all_negative_prompts
 
             try:
@@ -157,19 +145,21 @@ class Script(scripts.Script):
                 )
 
         # get master ipm by estimating based on worker speed
-        master_elapsed = time.time() - Script.master_start
+        master_elapsed = time.time() - self.master_start
         logger.debug(f"Took master {master_elapsed:.2f}s")
 
         # wait for response from all workers
-        for thread in Script.worker_threads:
+        webui_state.textinfo = "Distributed - receiving results"
+        for thread in self.worker_threads:
             logger.debug(f"waiting for worker thread '{thread.name}'")
             thread.join()
-        Script.worker_threads.clear()
+        self.worker_threads.clear()
         logger.debug("all worker request threads returned")
+        webui_state.textinfo = "Distributed - injecting images"
 
         # some worker which we know has a good response that we can use for generating the grid
         donor_worker = None
-        for job in Script.world.jobs:
+        for job in self.world.jobs:
             if job.batch_size < 1 or job.worker.master:
                 continue
 
@@ -177,7 +167,7 @@ class Script(scripts.Script):
                 images: json = job.worker.response["images"]
                 # if we for some reason get more than we asked for
                 if (job.batch_size * p.n_iter) < len(images):
-                    logger.debug(f"Requested {job.batch_size} image(s) from '{job.worker.label}', got {len(images)}")
+                    logger.debug(f"requested {job.batch_size} image(s) from '{job.worker.label}', got {len(images)}")
 
                 if donor_worker is None:
                     donor_worker = job.worker
@@ -208,7 +198,7 @@ class Script(scripts.Script):
 
         # generate and inject grid
         if opts.return_grid:
-            grid = processing.images.image_grid(processed.images, len(processed.images))
+            grid = images.image_grid(processed.images, len(processed.images))
             processed_inject_image(
                 image=grid,
                 info_index=0,
@@ -218,35 +208,22 @@ class Script(scripts.Script):
             )
 
         # cleanup after we're doing using all the responses
-        for worker in Script.world.get_workers():
+        for worker in self.world.get_workers():
             worker.response = None
 
         p.batch_size = len(processed.images)
         return
 
-    @staticmethod
-    def initialize(initial_payload):
-        # get default batch size
-        try:
-            batch_size = initial_payload.batch_size
-        except AttributeError:
-            batch_size = 1
-
-        try:
-            Script.world.initialize(batch_size)
-            logger.debug(f"World initialized!")
-        except WorldAlreadyInitialized:
-            Script.world.update_world(total_batch_size=batch_size)
-
     # p's type is
-    # "modules.processing.StableDiffusionProcessingTxt2Img"
+    # "modules.processing.StableDiffusionProcessing*"
     def before_process(self, p, *args):
         if not self.world.enabled:
             logger.debug("extension is disabled")
             return
+        self.world.update(p)
 
-        current_thread().name = "distributed_main"
-        Script.initialize(initial_payload=p)
+        # save original process_images_inner function for later if we monkeypatch it
+        self.original_process_images_inner = processing.process_images_inner
 
         # strip scripts that aren't yet supported and warn user
         packed_script_args: List[dict] = []  # list of api formatted per-script argument objects
@@ -261,8 +238,9 @@ class Script(scripts.Script):
                 # grab all controlnet units
                 cn_units = []
                 cn_args = p.script_args[script.args_from:script.args_to]
+
                 for cn_arg in cn_args:
-                    if type(cn_arg).__name__ == "UiControlNetUnit":
+                    if "ControlNetUnit" in type(cn_arg).__name__:
                         cn_units.append(cn_arg)
                 logger.debug(f"Detected {len(cn_units)} controlnet unit(s)")
 
@@ -281,7 +259,7 @@ class Script(scripts.Script):
         # encapsulating the request object within a txt2imgreq object is deprecated and no longer works
         # see test/basic_features/txt2img_test.py for an example
         payload = copy.copy(p.__dict__)
-        payload['batch_size'] = Script.world.default_batch_size()
+        payload['batch_size'] = self.world.default_batch_size()
         payload['scripts'] = None
         try:
             del payload['script_args']
@@ -300,8 +278,9 @@ class Script(scripts.Script):
         # TODO api for some reason returns 200 even if something failed to be set.
         #  for now we may have to make redundant GET requests to check if actually successful...
         #  https://github.com/AUTOMATIC1111/stable-diffusion-webui/issues/8146
+
         name = re.sub(r'\s?\[[^]]*]$', '', opts.data["sd_model_checkpoint"])
-        vae = opts.data["sd_vae"]
+        vae = opts.data.get('sd_vae')
         option_payload = {
             "sd_model_checkpoint": name,
             "sd_vae": vae
@@ -309,11 +288,11 @@ class Script(scripts.Script):
 
         # start generating images assigned to remote machines
         sync = False  # should only really need to sync once per job
-        Script.world.optimize_jobs(payload)  # optimize work assignment before dispatching
+        self.world.optimize_jobs(payload)  # optimize work assignment before dispatching
         started_jobs = []
 
         # check if anything even needs to be done
-        if len(Script.world.jobs) == 1 and Script.world.jobs[0].worker.master:
+        if len(self.world.jobs) == 1 and self.world.jobs[0].worker.master:
 
             if payload['batch_size'] >= 2:
                 msg = f"all remote workers are offline or unreachable"
@@ -324,7 +303,7 @@ class Script(scripts.Script):
 
             return
 
-        for job in Script.world.jobs:
+        for job in self.world.jobs:
             payload_temp = copy.copy(payload)
             del payload_temp['scripts_value']
             payload_temp = copy.deepcopy(payload_temp)
@@ -339,11 +318,14 @@ class Script(scripts.Script):
                 prior_images += j.batch_size * p.n_iter
 
             payload_temp['batch_size'] = job.batch_size
+            if job.step_override is not None:
+                payload_temp['steps'] = job.step_override
             payload_temp['subseed'] += prior_images
             payload_temp['seed'] += prior_images if payload_temp['subseed_strength'] == 0 else 0
             logger.debug(
                 f"'{job.worker.label}' job's given starting seed is "
-                f"{payload_temp['seed']} with {prior_images} coming before it")
+                f"{payload_temp['seed']} with {prior_images} coming before it"
+            )
 
             if job.worker.loaded_model != name or job.worker.loaded_vae != vae:
                 sync = True
@@ -354,42 +336,34 @@ class Script(scripts.Script):
                        name=f"{job.worker.label}_request")
 
             t.start()
-            Script.worker_threads.append(t)
+            self.worker_threads.append(t)
             started_jobs.append(job)
 
         # if master batch size was changed again due to optimization change it to the updated value
         if not self.world.thin_client_mode:
-            p.batch_size = Script.world.master_job().batch_size
-        Script.master_start = time.time()
+            p.batch_size = self.world.master_job().batch_size
+        self.master_start = time.time()
 
         # generate images assigned to local machine
         p.do_not_save_grid = True  # don't generate grid from master as we are doing this later.
-        if Script.world.thin_client_mode:
-            p.batch_size = 0
-            processed = Processed(p=p, images_list=[])
-            processed.all_prompts = []
-            processed.all_seeds = []
-            processed.all_subseeds = []
-            processed.all_negative_prompts = []
-            processed.infotexts = []
-            processed.prompt = None
-
-        Script.runs_since_init += 1
+        self.runs_since_init += 1
         return
 
-    @staticmethod
-    def postprocess(p, processed, *args):
-        if not Script.world.enabled:
+    def postprocess(self, p, processed, *args):
+        if not self.world.enabled:
             return
 
-        if len(processed.images) >= 1 and Script.master_start is not None:
-            Script.add_to_gallery(p=p, processed=processed)
+        if self.master_start is not None:
+            self.add_to_gallery(p=p, processed=processed)
+
+        # restore process_images_inner if it was monkey-patched
+        processing.process_images_inner = self.original_process_images_inner
 
     @staticmethod
     def signal_handler(sig, frame):
         logger.debug("handling interrupt signal")
         # do cleanup
-        Script.world.save_config()
+        DistributedScript.world.save_config()
 
         if sig == signal.SIGINT:
             if callable(old_sigint_handler):

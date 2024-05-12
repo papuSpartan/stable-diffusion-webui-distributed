@@ -14,8 +14,7 @@ worker_select_dropdown = None
 class UI:
     """extension user interface related things"""
 
-    def __init__(self, script, world):
-        self.script = script
+    def __init__(self, world):
         self.world = world
         self.original_model_dropdown_handler = opts.data_labels.get('sd_model_checkpoint').onchange
 
@@ -25,10 +24,17 @@ class UI:
         """executes a script placed by the user at <extension>/user/sync*"""
         user_scripts = Path(os.path.abspath(__file__)).parent.parent.joinpath('user')
 
+        user_script = None
         for file in user_scripts.iterdir():
             logger.debug(f"found possible script {file.name}")
             if file.is_file() and file.name.startswith('sync'):
                 user_script = file
+        if user_script is None:
+            logger.error(
+                "couldn't find user script\n"
+                "script must be placed under <extension>/user/ and filename must begin with sync"
+            )
+            return False
 
         suffix = user_script.suffix[1:]
 
@@ -74,15 +80,14 @@ class UI:
 
         return 'No active jobs!', worker_status, logs
 
-    def save_btn(self, thin_client_mode, job_timeout, complement_production):
+    def save_btn(self, thin_client_mode, job_timeout, complement_production, step_scaling):
         """updates the options visible on the settings tab"""
 
         self.world.thin_client_mode = thin_client_mode
-        logger.debug(f"thin client mode is now {thin_client_mode}")
         job_timeout = int(job_timeout)
         self.world.job_timeout = job_timeout
-        logger.debug(f"job timeout is now {job_timeout} seconds")
         self.world.complement_production = complement_production
+        self.world.step_scaling = step_scaling
         self.world.save_config()
 
     def save_worker_btn(self, label, address, port, tls, disabled):
@@ -102,7 +107,7 @@ class UI:
             self.world.add_worker(
                 label=label,
                 address=address,
-                port=port,
+                port=port if len(port) > 0 else 7860,
                 tls=tls,
                 state=state
             )
@@ -208,7 +213,6 @@ class UI:
                     interactive=True
                 )
                 main_toggle.input(self.main_toggle_btn)
-                setattr(main_toggle, 'do_not_save_to_config', True)  # ui_loadsave.py apply_field()
                 components.append(main_toggle)
 
                 with gradio.Tab('Status') as status_tab:
@@ -240,7 +244,7 @@ class UI:
                         reload_config_btn = gradio.Button(value='📜 Reload config')
                         reload_config_btn.click(self.world.load_config)
 
-                        redo_benchmarks_btn = gradio.Button(value='📊 Redo benchmarks', variant='stop')
+                        redo_benchmarks_btn = gradio.Button(value='📊 Redo benchmarks')
                         redo_benchmarks_btn.click(self.benchmark_btn, inputs=[], outputs=[])
 
                         run_usr_btn = gradio.Button(value='⚙️ Run script')
@@ -252,10 +256,10 @@ class UI:
                         reconnect_lost_workers_btn = gradio.Button(value='🔌 Reconnect workers')
                         reconnect_lost_workers_btn.click(self.world.ping_remotes)
 
-                        interrupt_all_btn = gradio.Button(value='⏸️ Interrupt all', variant='stop')
+                        interrupt_all_btn = gradio.Button(value='⏸️ Interrupt all')
                         interrupt_all_btn.click(self.world.interrupt_remotes)
 
-                        restart_workers_btn = gradio.Button(value="🔁 Restart All", variant='stop')
+                        restart_workers_btn = gradio.Button(value="🔁 Restart All")
                         restart_workers_btn.click(
                             _js="confirm_restart_workers",
                             fn=lambda confirmed: self.world.restart_all() if confirmed else None,
@@ -305,7 +309,7 @@ class UI:
                         # API authentication
                         worker_api_auth_cbx = gradio.Checkbox(label='API Authentication')
                         worker_user_field = gradio.Textbox(label='Username')
-                        worker_password_field = gradio.Textbox(label='Password')
+                        worker_password_field = gradio.Textbox(label='Password', type='password')
                         update_credentials_btn = gradio.Button(value='Update API Credentials')
                         update_credentials_btn.click(self.update_credentials_btn, inputs=[
                             worker_api_auth_cbx,
@@ -346,25 +350,33 @@ class UI:
 
                 with gradio.Tab('Settings'):
                     thin_client_cbx = gradio.Checkbox(
-                        label='Thin-client mode (experimental)',
-                        info="(BROKEN) Only generate images using remote workers. There will be no previews when enabled.",
+                        label='Thin-client mode',
+                        info="Only generate images remotely (no image previews yet)",
                         value=self.world.thin_client_mode
                     )
                     job_timeout = gradio.Number(
                         label='Job timeout', value=self.world.job_timeout,
                         info="Seconds until a worker is considered too slow to be assigned an"
-                             " equal share of the total request. Longer than 2 seconds is recommended."
+                             " equal share of the total request. Longer than 2 seconds is recommended"
                     )
 
                     complement_production = gradio.Checkbox(
                         label='Complement production',
-                        info='Prevents under-utilization of hardware by requesting additional images',
+                        info='Prevents under-utilization by requesting additional images when possible',
                         value=self.world.complement_production
                     )
 
+                    # reduces image quality the more the sample-count must be reduced
+                    # good for mixed setups where each worker may not be around the same speed
+                    step_scaling = gradio.Checkbox(
+                        label='Step scaling',
+                        info='Prevents under-utilization via sample reduction in order to meet time constraints',
+                        value=self.world.step_scaling
+                    )
+
                     save_btn = gradio.Button(value='Update')
-                    save_btn.click(fn=self.save_btn, inputs=[thin_client_cbx, job_timeout, complement_production])
-                    components += [thin_client_cbx, job_timeout, complement_production, save_btn]
+                    save_btn.click(fn=self.save_btn, inputs=[thin_client_cbx, job_timeout, complement_production, step_scaling])
+                    components += [thin_client_cbx, job_timeout, complement_production, step_scaling, save_btn]
 
                 with gradio.Tab('Help'):
                     gradio.Markdown(
@@ -374,4 +386,7 @@ class UI:
                         """
                     )
 
+            # prevent wui from overriding any values
+            for component in components:
+                setattr(component, 'do_not_save_to_config', True)  # ui_loadsave.py apply_field()
             return components

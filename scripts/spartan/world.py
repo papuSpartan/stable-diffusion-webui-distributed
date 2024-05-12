@@ -4,7 +4,7 @@ This module facilitates the creation of a stable-diffusion-webui centered distri
 World:
     The main class which should be instantiated in order to create a new sdwui distributed system.
 """
-
+import concurrent.futures
 import copy
 import json
 import os
@@ -16,21 +16,16 @@ import modules.shared as shared
 from modules.processing import process_images, StableDiffusionProcessingTxt2Img
 from . import shared as sh
 from .pmodels import ConfigModel, Benchmark_Payload
-from .shared import logger, warmup_samples, extension_path
+from .shared import logger, extension_path
 from .worker import Worker, State
+from modules.call_queue import wrap_queued_call
+from modules import processing
 
 
 class NotBenchmarked(Exception):
     """
     Should be raised when attempting to do something that requires knowledge of worker benchmark statistics, and
     they haven't been calculated yet.
-    """
-    pass
-
-
-class WorldAlreadyInitialized(Exception):
-    """
-    Raised when attempting to initialize the World when it has already been initialized.
     """
     pass
 
@@ -48,6 +43,7 @@ class Job:
         self.worker: Worker = worker
         self.batch_size: int = batch_size
         self.complementary: bool = False
+        self.step_override = None
 
     def __str__(self):
         prefix = ''
@@ -75,7 +71,7 @@ class World:
     The frame or "world" which holds all workers (including the local machine).
 
     Args:
-        initial_payload: The original txt2img payload created by the user initiating the generation request on master.
+        p: The original processing state object created by the user initiating the generation request on master.
         verify_remotes (bool): Whether to validate remote worker certificates.
     """
 
@@ -83,19 +79,19 @@ class World:
     config_path = shared.cmd_opts.distributed_config
     old_config_path = worker_info_path = extension_path.joinpath('workers.json')
 
-    def __init__(self, initial_payload, verify_remotes: bool = True):
+    def __init__(self, verify_remotes: bool = True):
+        self.p = None
         self.master_worker = Worker(master=True)
-        self.total_batch_size: int = 0
         self._workers: List[Worker] = [self.master_worker]
         self.jobs: List[Job] = []
         self.job_timeout: int = 3  # seconds
         self.initialized: bool = False
         self.verify_remotes = verify_remotes
-        self.initial_payload = copy.copy(initial_payload)
         self.thin_client_mode = False
         self.enabled = True
         self.is_dropdown_handler_injected = False
         self.complement_production = True
+        self.step_scaling = False
 
     def __getitem__(self, label: str) -> Worker:
         for worker in self._workers:
@@ -105,32 +101,12 @@ class World:
     def __repr__(self):
         return f"{len(self._workers)} workers"
 
-    def update_world(self, total_batch_size):
-        """
-        Updates the world with information vital to handling the local generation request after
-            the world has already been initialized.
-
-        Args:
-            total_batch_size (int): The total number of images requested by the local/master sdwui instance.
-        """
-
-        self.total_batch_size = total_batch_size
-        self.update_jobs()
-
-    def initialize(self, total_batch_size):
-        """should be called before a world instance is used for anything"""
-        if self.initialized:
-            raise WorldAlreadyInitialized("This world instance was already initialized")
-
-        self.benchmark()
-        self.update_world(total_batch_size=total_batch_size)
-        self.initialized = True
 
     def default_batch_size(self) -> int:
         """the amount of images/total images requested that a worker would compute if conditions were perfect and
         each worker generated at the same speed. assumes one batch only"""
 
-        return self.total_batch_size // self.size()
+        return self.p.batch_size // self.size()
 
     def size(self) -> int:
         """
@@ -169,6 +145,14 @@ class World:
             Worker: The worker object.
         """
 
+        # protect against user trying to make cyclical setups and connections
+        is_master = kwargs.get('master')
+        if is_master is None or not is_master:
+            m = self.master()
+            if kwargs['address'] == m.address and kwargs['port'] == m.port:
+                logger.error(f"refusing to add worker {kwargs['label']} as its socket definition({m.address}:{m.port}) matches master")
+                return None
+
         original = self[kwargs['label']]  # if worker doesn't already exist then just make a new one
         if original is None:
             new = Worker(**kwargs)
@@ -192,16 +176,33 @@ class World:
             if worker.master:
                 continue
 
-            t = Thread(target=worker.interrupt, args=())
-            t.start()
+            Thread(target=worker.interrupt, args=()).start()
 
     def refresh_checkpoints(self):
         for worker in self.get_workers():
             if worker.master:
                 continue
 
-            t = Thread(target=worker.refresh_checkpoints, args=())
-            t.start()
+            Thread(target=worker.refresh_checkpoints, args=()).start()
+
+    def sample_master(self) -> float:
+        # wrap our benchmark payload
+        master_bench_payload = StableDiffusionProcessingTxt2Img()
+        d = sh.benchmark_payload.dict()
+        for key in d:
+            setattr(master_bench_payload, key, d[key])
+
+        # Keeps from trying to save the images when we don't know the path. Also, there's not really any reason to.
+        master_bench_payload.do_not_save_samples = True
+        # shared.state.begin(job='distributed_master_bench')
+        wrapped = (wrap_queued_call(process_images))
+        start = time.time()
+        wrapped(master_bench_payload)
+        # wrap_gradio_gpu_call(process_images)(master_bench_payload)
+        # shared.state.end()
+
+        return time.time() - start
+
 
     def benchmark(self, rebenchmark: bool = False):
         """
@@ -209,14 +210,6 @@ class World:
         """
 
         unbenched_workers = []
-        benchmark_threads: List[Thread] = []
-        sync_threads: List[Thread] = []
-
-        def benchmark_wrapped(worker):
-            bench_func = worker.benchmark if not worker.master else self.benchmark_master
-            worker.avg_ipm = bench_func()
-            worker.benchmarked = True
-
         if rebenchmark:
             for worker in self._workers:
                 worker.benchmarked = False
@@ -231,28 +224,44 @@ class World:
                 else:
                     worker.benchmarked = True
 
-        # have every unbenched worker load the same weights before the benchmark
-        for worker in unbenched_workers:
-            if worker.master or worker.state == State.DISABLED:
-                continue
+        with concurrent.futures.ThreadPoolExecutor(thread_name_prefix='distributed_benchmark') as executor:
+            futures = []
 
-            sync_thread = Thread(target=worker.load_options, args=(shared.opts.sd_model_checkpoint, shared.opts.sd_vae))
-            sync_threads.append(sync_thread)
-            sync_thread.start()
-        for thread in sync_threads:
-            thread.join()
+            # have every unbenched worker load the same weights before the benchmark
+            for worker in unbenched_workers:
+                if worker.master or worker.state in (State.DISABLED, State.UNAVAILABLE):
+                    continue
 
-        # benchmark those that haven't been
-        for worker in unbenched_workers:
-            t = Thread(target=benchmark_wrapped, args=(worker, ), name=f"{worker.label}_benchmark")
-            benchmark_threads.append(t)
-            t.start()
-            logger.info(f"benchmarking worker '{worker.label}'")
+                futures.append(
+                    executor.submit(worker.load_options, model=shared.opts.sd_model_checkpoint, vae=shared.opts.sd_vae)
+                )
+            for future in concurrent.futures.as_completed(futures):
+                worker = future.result()
+                if worker is None:
+                    continue
 
-        # wait for all benchmarks to finish and update stats on newly benchmarked workers
-        if len(benchmark_threads) > 0:
-            for t in benchmark_threads:
-                t.join()
+                if worker.response.status_code != 200:
+                    logger.error(f"refusing to benchmark worker '{worker.label}' as it failed to load the selected model '{shared.opts.sd_model_checkpoint}'\n"
+                                 f"*you may circumvent this by using the per-worker model override setting but this is not recommended as the same benchmark model should be used for all workers")
+                    unbenched_workers = list(filter(lambda w: w != worker, unbenched_workers))
+            futures.clear()
+
+            # benchmark those that haven't been
+            for worker in unbenched_workers:
+                if worker.state in (State.DISABLED, State.UNAVAILABLE):
+                    logger.debug(f"worker '{worker.label}' is {worker.state}, refusing to benchmark")
+                    continue
+
+                if worker.model_override is not None:
+                    logger.warning(f"model override is enabled for worker '{worker.label}' which may result in poor optimization\n"
+                                   f"*all workers should be evaluated against the same model")
+
+                chosen = worker.benchmark if not worker.master else worker.benchmark(sample_function=self.sample_master)
+                futures.append(executor.submit(chosen, worker))
+                logger.info(f"benchmarking worker '{worker.label}'")
+
+            # wait for all benchmarks to finish and update stats on newly benchmarked workers
+            concurrent.futures.wait(futures)
             logger.info("benchmarking finished")
 
             # save benchmark results to workers.json
@@ -348,43 +357,11 @@ class World:
         if worker == fastest_worker:
             return 0
 
-        lag = worker.batch_eta(payload=payload, quiet=True, batch_size=batch_size) - fastest_worker.batch_eta(payload=payload, quiet=True, batch_size=batch_size)
+        lag = worker.eta(payload=payload, quiet=True, batch_size=batch_size) - fastest_worker.eta(payload=payload, quiet=True, batch_size=batch_size)
 
         return lag
 
-    def benchmark_master(self) -> float:
-        """
-        Benchmarks the local/master worker.
-
-        Returns:
-            float: Local worker speed in ipm
-        """
-
-        # wrap our benchmark payload
-        master_bench_payload = StableDiffusionProcessingTxt2Img()
-        d = sh.benchmark_payload.dict()
-        for key in d:
-            setattr(master_bench_payload, key, d[key])
-
-        # Keeps from trying to save the images when we don't know the path. Also, there's not really any reason to.
-        master_bench_payload.do_not_save_samples = True
-
-        # "warm up" due to initial generation lag
-        for _ in range(warmup_samples):
-            process_images(master_bench_payload)
-
-        # get actual sample
-        start = time.time()
-        process_images(master_bench_payload)
-        elapsed = time.time() - start
-
-        ipm = sh.benchmark_payload.batch_size / (elapsed / 60)
-
-        logger.debug(f"Master benchmark took {elapsed:.2f}: {ipm:.2f} ipm")
-        self.master().benchmarked = True
-        return ipm
-
-    def update_jobs(self):
+    def make_jobs(self):
         """creates initial jobs (before optimization) """
 
         # clear jobs if this is not the first time running
@@ -398,6 +375,19 @@ class World:
                     worker.benchmark()
 
                 self.jobs.append(Job(worker=worker, batch_size=batch_size))
+                logger.debug(f"added job for worker {worker.label}")
+
+    def update(self, p):
+        """preps world for another run"""
+        if not self.initialized:
+            self.benchmark()
+            self.initialized = True
+            logger.debug("world initialized!")
+        else:
+            logger.debug("world was already initialized")
+
+        self.p = p
+        self.make_jobs()
 
     def get_workers(self):
         filtered: List[Worker] = []
@@ -434,7 +424,7 @@ class World:
 
             logger.debug(f"worker '{job.worker.label}' would stall the image gallery by ~{lag:.2f}s\n")
             job.complementary = True
-            if deferred_images + images_checked + payload['batch_size'] > self.total_batch_size:
+            if deferred_images + images_checked + payload['batch_size'] > self.p.batch_size:
                 logger.debug(f"would go over actual requested size")
             else:
                 deferred_images += payload['batch_size']
@@ -477,9 +467,9 @@ class World:
         #######################
 
         # when total number of requested images was not cleanly divisible by world size then we tack the remainder on
-        remainder_images = self.total_batch_size - self.get_current_output_size()
+        remainder_images = self.p.batch_size - self.get_current_output_size()
         if remainder_images >= 1:
-            logger.debug(f"The requested number of images({self.total_batch_size}) was not cleanly divisible by the number of realtime nodes({len(self.realtime_jobs())}) resulting in {remainder_images} that will be redistributed")
+            logger.debug(f"The requested number of images({self.p.batch_size}) was not cleanly divisible by the number of realtime nodes({len(self.realtime_jobs())}) resulting in {remainder_images} that will be redistributed")
 
             realtime_jobs = self.realtime_jobs()
             realtime_jobs.sort(key=lambda x: x.batch_size)
@@ -521,16 +511,16 @@ class World:
                 fastest_active = self.fastest_realtime_job().worker
                 for j in self.jobs:
                     if j.worker.label == fastest_active.label:
-                        slack_time = fastest_active.batch_eta(payload=payload, batch_size=j.batch_size) + self.job_timeout
+                        slack_time = fastest_active.eta(payload=payload, batch_size=j.batch_size) + self.job_timeout
                 logger.debug(f"There's {slack_time:.2f}s of slack time available for worker '{job.worker.label}'")
 
                 # see how long it would take to produce only 1 image on this complementary worker
-                secs_per_batch_image = job.worker.batch_eta(payload=payload, batch_size=1)
+                secs_per_batch_image = job.worker.eta(payload=payload, batch_size=1)
                 num_images_compensate = int(slack_time / secs_per_batch_image)
                 logger.debug(
                     f"worker '{job.worker.label}':\n"
                     f"{num_images_compensate} complementary image(s) = {slack_time:.2f}s slack"
-                    f"/ {secs_per_batch_image:.2f}s per requested image"
+                    f" ÷ {secs_per_batch_image:.2f}s per requested image"
                 )
 
                 if not job.add_work(payload, batch_size=num_images_compensate):
@@ -538,20 +528,51 @@ class World:
                     request_img_size = payload['width'] * payload['height']
                     max_images = job.worker.pixel_cap // request_img_size
                     job.add_work(payload, batch_size=max_images)
+
+                # when not even a singular image can be squeezed out
+                # if step scaling is enabled, then find how many samples would be considered realtime and adjust
+                if num_images_compensate == 0 and self.step_scaling:
+                    seconds_per_sample = job.worker.eta(payload=payload, batch_size=1, samples=1)
+                    realtime_samples = slack_time // seconds_per_sample
+                    logger.debug(
+                        f"job for '{job.worker.label}' downscaled to {realtime_samples} samples to meet time constraints\n"
+                        f"{realtime_samples:.0f} samples = {slack_time:.2f}s slack ÷ {seconds_per_sample:.2f}s/sample\n"
+                        f"  step reduction: {payload['steps']} -> {realtime_samples:.0f}"
+                    )
+
+                    job.add_work(payload=payload, batch_size=1)
+                    job.step_override = realtime_samples
+
         else:
             logger.debug("complementary image production is disabled")
 
         iterations = payload['n_iter']
         num_returning = self.get_current_output_size()
-        num_complementary = num_returning - self.total_batch_size
+        num_complementary = num_returning - self.p.batch_size
         distro_summary = "Job distribution:\n"
-        distro_summary += f"{self.total_batch_size} * {iterations} iteration(s)"
+        distro_summary += f"{self.p.batch_size} * {iterations} iteration(s)"
         if num_complementary > 0:
             distro_summary += f" + {num_complementary} complementary"
         distro_summary += f": {num_returning} images total\n"
         for job in self.jobs:
             distro_summary += f"'{job.worker.label}' - {job.batch_size * iterations} image(s) @ {job.worker.avg_ipm:.2f} ipm\n"
         logger.info(distro_summary)
+
+        if self.thin_client_mode is True or self.master_job().batch_size == 0:
+            # save original process_images_inner for later so we can restore once we're done
+            logger.debug(f"bypassing local generation completely")
+            def process_images_inner_bypass(p) -> processing.Processed:
+                processed = processing.Processed(p, [], p.seed, info="")
+                processed.all_prompts = []
+                processed.all_seeds = []
+                processed.all_subseeds = []
+                processed.all_negative_prompts = []
+                processed.infotexts = []
+                processed.prompt = None
+
+                self.p.scripts.postprocess(p, processed)
+                return processed
+            processing.process_images_inner = process_images_inner_bypass
 
         # delete any jobs that have no work
         last = len(self.jobs) - 1
@@ -631,6 +652,8 @@ class World:
             label = next(iter(w.keys()))
             fields = w[label].__dict__
             fields['label'] = label
+            # TODO must be overridden everytime here or later converted to a config file variable at some point
+            fields['verify_remotes'] = self.verify_remotes
 
             self.add_worker(**fields)
 
@@ -638,6 +661,7 @@ class World:
         self.job_timeout = config.job_timeout
         self.enabled = config.enabled
         self.complement_production = config.complement_production
+        self.step_scaling = config.step_scaling
 
         logger.debug("config loaded")
 
@@ -651,7 +675,8 @@ class World:
             benchmark_payload=sh.benchmark_payload,
             job_timeout=self.job_timeout,
             enabled=self.enabled,
-            complement_production=self.complement_production
+            complement_production=self.complement_production,
+            step_scaling=self.step_scaling
         )
 
         with open(self.config_path, 'w+') as config_file:
@@ -679,22 +704,24 @@ class World:
                     if worker.queried and worker.state == State.IDLE:  # TODO worker.queried
                         continue
 
-                    # for now skip/remove scripts that are not "always on" since there is currently no way to run
-                    # them at the same time as distributed
                     supported_scripts = {
                         'txt2img': [],
                         'img2img': []
                     }
-                    script_info = worker.session.get(url=worker.full_url('script-info')).json()
 
-                    for key in script_info:
-                        name = key.get('name', None)
+                    response = worker.session.get(url=worker.full_url('script-info'))
+                    if response.status_code == 200:
+                        script_info = response.json()
+                        for key in script_info:
+                            name = key.get('name', None)
 
-                        if name is not None:
-                            is_alwayson = key.get('is_alwayson', False)
-                            is_img2img = key.get('is_img2img', False)
-                            if is_alwayson:
-                                supported_scripts['img2img' if is_img2img else 'txt2img'].append(name)
+                            if name is not None:
+                                is_alwayson = key.get('is_alwayson', False)
+                                is_img2img = key.get('is_img2img', False)
+                                if is_alwayson:
+                                    supported_scripts['img2img' if is_img2img else 'txt2img'].append(name)
+                    else:
+                        logger.error(f"failed to query script-info for worker '{worker.label}': {response}")
                     worker.supported_scripts = supported_scripts
 
                     msg = f"worker '{worker.label}' is online"

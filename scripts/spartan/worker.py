@@ -156,6 +156,11 @@ class Worker:
     def __repr__(self):
         return f"'{self.label}'@{self.address}:{self.port}, speed: {self.avg_ipm} ipm, state: {self.state}"
 
+    def __eq__(self, other):
+        if isinstance(other, Worker) and other.label == self.label:
+            return True
+        return False
+
     @property
     def model(self) -> Worker_Model:
         return Worker_Model(**self.__dict__)
@@ -189,14 +194,14 @@ class Worker:
         protocol = 'http' if not self.tls else 'https'
         return f"{protocol}://{self.__str__()}/sdapi/v1/{route}"
 
-    def batch_eta_hr(self, payload: dict) -> float:
+    def eta_hr(self, payload: dict) -> float:
         """
         takes a normal payload and returns the eta of a pseudo payload which mirrors the hr-fix parameters
         This returns the eta of how long it would take to run hr-fix on the original image
         """
 
         pseudo_payload = copy.copy(payload)
-        pseudo_payload['enable_hr'] = False  # prevent overflow in self.batch_eta
+        pseudo_payload['enable_hr'] = False  # prevent overflow in self.eta
         res_ratio = pseudo_payload['hr_scale']
         original_steps = pseudo_payload['steps']
         second_pass_steps = pseudo_payload['hr_second_pass_steps']
@@ -212,12 +217,11 @@ class Worker:
         pseudo_payload['width'] = pseudo_width
         pseudo_payload['height'] = pseudo_height
 
-        eta = self.batch_eta(payload=pseudo_payload, quiet=True)
-        return eta
+        return self.eta(payload=pseudo_payload, quiet=True)
 
-    def batch_eta(self, payload: dict, quiet: bool = False, batch_size: int = None) -> float:
+    def eta(self, payload: dict, quiet: bool = False, batch_size: int = None, samples: int = None) -> float:
         """
-            estimate how long it will take to generate <batch_size> images on a worker in seconds
+            estimate how long it will take to generate image(s) on a worker in seconds
 
             Args:
                 payload: Sdwui api formatted payload
@@ -225,7 +229,7 @@ class Worker:
                 batch_size: Overrides the batch_size parameter of the payload
         """
 
-        steps = payload['steps']
+        steps = payload['steps'] if samples is None else samples
         num_images = payload['batch_size'] if batch_size is None else batch_size
 
         # if worker has not yet been benchmarked then
@@ -237,7 +241,7 @@ class Worker:
         # show effect of high-res fix
         hr = payload.get('enable_hr', False)
         if hr:
-            eta += self.batch_eta_hr(payload=payload)
+            eta += self.eta_hr(payload=payload)
 
         # show effect of image size
         real_pix_to_benched = (payload['width'] * payload['height']) \
@@ -331,7 +335,7 @@ class Worker:
                 self.load_options(model=option_payload['sd_model_checkpoint'], vae=option_payload['sd_vae'])
 
             if self.benchmarked:
-                eta = self.batch_eta(payload=payload) * payload['n_iter']
+                eta = self.eta(payload=payload) * payload['n_iter']
                 logger.debug(f"worker '{self.label}' predicts it will take {eta:.3f}s to generate "
                              f"{payload['batch_size'] * payload['n_iter']} image(s) "
                              f"at a speed of {self.avg_ipm:.2f} ipm\n")
@@ -471,7 +475,7 @@ class Worker:
                     self.response_time = time.time() - start
                     variance = ((eta - self.response_time) / self.response_time) * 100
 
-                    logger.debug(f"Worker '{self.label}'s ETA was off by {variance:.2f}%.\n"
+                    logger.debug(f"Worker '{self.label}'s ETA was off by {variance:.2f}%\n"
                                  f"Predicted {eta:.2f}s. Actual: {self.response_time:.2f}s\n")
 
                     # if the variance is greater than 500% then we ignore it to prevent variation inflation
@@ -501,20 +505,20 @@ class Worker:
         self.jobs_requested += 1
         return
 
-    def benchmark(self) -> float:
+    def benchmark(self, sample_function: callable = None) -> float:
         """
         given a worker, run a small benchmark and return its performance in images/minute
         makes standard request(s) of 512x512 images and averages them to get the result
         """
 
         t: Thread
-        samples = 2  # number of times to benchmark the remote / accuracy
 
-        if self.state == State.DISABLED or self.state == State.UNAVAILABLE:
+        if self.state in (State.DISABLED, State.UNAVAILABLE):
             logger.debug(f"worker '{self.label}' is unavailable or disabled, refusing to benchmark")
             return 0
 
-        if self.master is True:
+        if self.master and sample_function is None:
+            logger.critical(f"no function provided for benchmarking master")
             return -1
 
         def ipm(seconds: float) -> float:
@@ -533,19 +537,24 @@ class Worker:
         results: List[float] = []
         # it used to be lower for the first couple of generations
         # this was due to something torch does at startup according to auto and is now done at sdwui startup
-        self.state = State.WORKING
-        for i in range(0, samples + warmup_samples):  # run some extra times so that the remote can "warm up"
+        for i in range(0, sh.samples + warmup_samples):  # run some extra times so that the remote can "warm up"
             if self.state == State.UNAVAILABLE:
                 self.response = None
                 return 0
 
-            t = Thread(target=self.request, args=(dict(sh.benchmark_payload), None, False,),
-                       name=f"{self.label}_benchmark_request")
             try:  # if the worker is unreachable/offline then handle that here
-                t.start()
-                start = time.time()
-                t.join()
-                elapsed = time.time() - start
+                elapsed = None
+
+                if not callable(sample_function):
+                    start = time.time()
+                    t = Thread(target=self.request, args=(dict(sh.benchmark_payload), None, False,),
+                               name=f"{self.label}_benchmark_request")
+                    t.start()
+                    t.join()
+                    elapsed = time.time() - start
+                else:
+                    elapsed = sample_function()
+
                 sample_ipm = ipm(elapsed)
             except InvalidWorkerResponse as e:
                 raise e
@@ -558,15 +567,13 @@ class Worker:
                 logger.debug(f"{self.label} finished warming up\n")
 
         # average the sample results for accuracy
-        ipm_sum = 0
-        for ipm_result in results:
-            ipm_sum += ipm_result
-        avg_ipm_result = ipm_sum / samples
+        avg_ipm_result = sum(results) / sh.samples
 
         logger.debug(f"Worker '{self.label}' average ipm: {avg_ipm_result:.2f}")
         self.avg_ipm = avg_ipm_result
         self.response = None
         self.benchmarked = True
+        self.eta_percent_error = []  # likely inaccurate after rebenching
         self.state = State.IDLE
         return avg_ipm_result
 
@@ -608,6 +615,10 @@ class Worker:
             return response.status_code == 200
 
         except requests.exceptions.ConnectionError as e:
+            logger.error(e)
+            return False
+        except requests.ReadTimeout as e:
+            logger.critical(f"worker '{self.label}' is online but not responding (crashed?)")
             logger.error(e)
             return False
 
@@ -676,6 +687,10 @@ class Worker:
             self.loaded_model = model_name
             if vae is not None:
                 self.loaded_vae = vae
+
+            self.response = response
+
+        return self
 
     def restart(self) -> bool:
         err_msg = f"could not restart worker '{self.label}'"

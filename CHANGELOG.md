@@ -1,6 +1,27 @@
 # Change Log
 Formatting: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
+## [2.2.0] - 2024-5-11
+
+### Added
+- Toggle for allowing automatic step scaling which can increase overall utilization
+
+### Changed
+- Adding workers which have the same socket definition as master will no longer be allowed and an error will show #28 
+- Workers in an invalid state should no longer be benchmarked
+- The worker port under worker config will now default to 7860 to prevent mishaps
+- Config should once again only be loaded once per session startup
+- A warning will be shown when trying to use the user script button but no script exists
+
+### Fixed
+- Thin-client mode
+- Some problems with sdwui forge branch
+- Certificate verification setting sometimes not saving
+- Master being assigned no work stopping generation (same problem as thin-client)
+
+### Removed
+- Adding workers using deprecated cmdline argument
+
 ## [2.1.0] - 2024-3-03
 
 ### Added
