@@ -17,7 +17,7 @@ import urllib3
 from PIL import Image
 from modules import processing
 from modules import scripts
-from modules.images import save_image
+from modules.images import save_image, image_grid
 from modules.processing import fix_seed
 from modules.shared import opts, cmd_opts
 from modules.shared import state as webui_state
@@ -198,7 +198,7 @@ class DistributedScript(scripts.Script):
 
         # generate and inject grid
         if opts.return_grid:
-            grid = images.image_grid(processed.images, len(processed.images))
+            grid = image_grid(processed.images, len(processed.images))
             processed_inject_image(
                 image=grid,
                 info_index=0,
