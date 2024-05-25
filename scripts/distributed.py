@@ -197,7 +197,7 @@ class DistributedScript(scripts.Script):
             return
 
         # generate and inject grid
-        if opts.return_grid:
+        if opts.return_grid and len(processed.images) > 1:
             grid = image_grid(processed.images, len(processed.images))
             processed_inject_image(
                 image=grid,
