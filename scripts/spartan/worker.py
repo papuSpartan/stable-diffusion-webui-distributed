@@ -718,22 +718,14 @@ class Worker:
             logger.debug(f"{self.label}: {self.state.name} -> {ns.name}")
             self.state = ns
 
-        match self.state:
-            case State.IDLE:
-                if state in (State.IDLE, State.WORKING):
-                    transition(state)
-
-            case State.WORKING:
-                if state in (State.WORKING, State.IDLE, State.INTERRUPTED):
-                    transition(state)
-
-            case State.UNAVAILABLE:
-                if state in State.IDLE:
-                    transition(state)
-
-            case State.INTERRUPTED:
-                if state in State.WORKING:
-                    transition(state)
+        transitions = {
+            State.IDLE: {State.IDLE, State.WORKING},
+            State.WORKING: {State.WORKING, State.IDLE, State.INTERRUPTED},
+            State.UNAVAILABLE: {State.IDLE},
+            State.INTERRUPTED: {State.WORKING},
+        }
+        if state in transitions.get(self.state, {}):
+            transition(state)
 
         if state == State.UNAVAILABLE:
             if self.state == State.DISABLED:
@@ -746,4 +738,4 @@ class Worker:
                 transition(state)
 
         if self.state == state_cache and self.state != state:
-            logger.error(f"{self.label}: invalid transition {self.state.name} -> {state.name}")
+            logger.error(f"{self.label}: invalid or redundant transition {self.state.name} -> {state.name}")
