@@ -727,7 +727,7 @@ class World:
                     msg = f"worker '{worker.label}' is online"
                     logger.info(msg)
                     gradio.Info("Distributed: "+msg)
-                    worker.state = State.IDLE
+                    worker.set_state(State.IDLE)
                 else:
                     msg = f"worker '{worker.label}' is unreachable"
                     logger.info(msg)
