@@ -712,7 +712,7 @@ class Worker:
 
         def transition(ns: State):
             if ns == self.state:
-                logger.critical(f"{self.label} was already {self.state.name}")
+                logger.debug(f"{self.label}: potentially redundant transition {self.state.name} -> {ns.name}")
                 return
 
             logger.debug(f"{self.label}: {self.state.name} -> {ns.name}")
@@ -738,4 +738,4 @@ class Worker:
                 transition(state)
 
         if self.state == state_cache and self.state != state:
-            logger.error(f"{self.label}: invalid or redundant transition {self.state.name} -> {state.name}")
+            logger.debug(f"{self.label}: invalid transition {self.state.name} -> {state.name}")

@@ -160,13 +160,7 @@ class World:
             return new
         else:
             for key in kwargs:
-                if hasattr(original, key):
-                    # TODO only necessary because this is skipping Worker.__init__ and the pyd model is saving the state as an int instead of an actual enum
-                    if key == 'state':
-                        original.state = kwargs[key] if type(kwargs[key]) is State else State(kwargs[key])
-                        continue
-
-                    setattr(original, key, kwargs[key])
+                setattr(original, key, kwargs[key])
 
             return original
 
@@ -535,7 +529,7 @@ class World:
                     seconds_per_sample = job.worker.eta(payload=payload, batch_size=1, samples=1)
                     realtime_samples = slack_time // seconds_per_sample
                     logger.debug(
-                        f"job for '{job.worker.label}' downscaled to {realtime_samples} samples to meet time constraints\n"
+                        f"job for '{job.worker.label}' downscaled to {realtime_samples:.0f} samples to meet time constraints\n"
                         f"{realtime_samples:.0f} samples = {slack_time:.2f}s slack ÷ {seconds_per_sample:.2f}s/sample\n"
                         f"  step reduction: {payload['steps']} -> {realtime_samples:.0f}"
                     )
@@ -654,6 +648,10 @@ class World:
             fields['label'] = label
             # TODO must be overridden everytime here or later converted to a config file variable at some point
             fields['verify_remotes'] = self.verify_remotes
+            # cast enum id to actual enum type and then prime state
+            fields['state'] = State(fields['state'])
+            if fields['state'] != State.DISABLED:
+                fields['state'] = State.IDLE
 
             self.add_worker(**fields)
 
@@ -667,7 +665,7 @@ class World:
 
     def save_config(self):
         """
-        Saves the config file.
+        Saves current state to the config file.
         """
 
         config = ConfigModel(
