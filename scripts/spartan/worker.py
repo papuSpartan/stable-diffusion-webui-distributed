@@ -707,11 +707,19 @@ class Worker:
         logger.error(f"{err_msg}: {response}")
         return False
 
-    def set_state(self, state: State):
+    def set_state(self, state: State, expect_cycle: bool = False):
+        """
+        Updates the state of a worker if considered a valid operation
+
+        Args:
+            state: the new state to try transitioning to
+            expect_cycle: whether this transition might be a no-op/self-loop
+
+        """
         state_cache = self.state
 
         def transition(ns: State):
-            if ns == self.state:
+            if ns == self.state and expect_cycle is False:
                 logger.debug(f"{self.label}: potentially redundant transition {self.state.name} -> {ns.name}")
                 return
 
