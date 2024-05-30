@@ -18,8 +18,9 @@ from . import shared as sh
 from .pmodels import ConfigModel, Benchmark_Payload
 from .shared import logger, extension_path
 from .worker import Worker, State
-from modules.call_queue import wrap_queued_call
+from modules.call_queue import wrap_queued_call, queue_lock
 from modules import processing
+from modules import progress
 
 
 class NotBenchmarked(Exception):
@@ -180,7 +181,10 @@ class World:
             Thread(target=worker.refresh_checkpoints, args=()).start()
 
     def sample_master(self) -> float:
-        # wrap our benchmark payload
+        # progress.finish_task(progress.current_task)
+        if queue_lock._lock.locked():
+            queue_lock.release()
+
         master_bench_payload = StableDiffusionProcessingTxt2Img()
         d = sh.benchmark_payload.dict()
         for key in d:
@@ -188,15 +192,16 @@ class World:
 
         # Keeps from trying to save the images when we don't know the path. Also, there's not really any reason to.
         master_bench_payload.do_not_save_samples = True
-        # shared.state.begin(job='distributed_master_bench')
-        wrapped = (wrap_queued_call(process_images))
+        shared.state.end()
+        wrapped = wrap_queued_call(process_images)
         start = time.time()
         wrapped(master_bench_payload)
-        # wrap_gradio_gpu_call(process_images)(master_bench_payload)
-        # shared.state.end()
+        # seems counter-intuitive but the lock will later be released again once the original task is ended by wui
+        # only doing things this way so that we can bench and then have an original user request immediately resume
+        if progress.current_task is not None:  # could be no task, ie. running bench from utils tab
+            queue_lock.acquire()
 
         return time.time() - start
-
 
     def benchmark(self, rebenchmark: bool = False):
         """
@@ -373,15 +378,15 @@ class World:
 
     def update(self, p):
         """preps world for another run"""
-        if not self.initialized:
-            self.benchmark()
-            self.initialized = True
-            logger.debug("world initialized!")
-        else:
-            logger.debug("world was already initialized")
 
         self.p = p
+        self.benchmark()
         self.make_jobs()
+
+        if not self.initialized:
+            self.initialized = True
+            logger.debug("world initialized!")
+
 
     def get_workers(self):
         filtered: List[Worker] = []
@@ -661,7 +666,7 @@ class World:
         self.complement_production = config.complement_production
         self.step_scaling = config.step_scaling
 
-        logger.debug("config loaded")
+        logger.debug(f"config loaded from '{os.path.abspath(self.config_path)}'")
 
     def save_config(self):
         """
