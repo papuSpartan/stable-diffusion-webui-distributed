@@ -7,6 +7,8 @@ from modules.shared import opts
 from modules.shared import state as webui_state
 from .shared import logger, LOG_LEVEL, gui_handler
 from .worker import State
+from modules.call_queue import queue_lock
+from modules import progress
 
 worker_select_dropdown = None
 
@@ -61,6 +63,10 @@ class UI:
         """debug utility that will clear the internal webui queue. sometimes good for jams"""
         logger.debug(webui_state.__dict__)
         webui_state.end()
+        progress.pending_tasks.clear()
+        progress.current_task = None
+        if queue_lock._lock.locked():
+            queue_lock.release()
 
     def status_btn(self):
         """updates a simplified overview of registered workers and their jobs"""
