@@ -344,7 +344,7 @@ class Worker:
                 # remove anything that is not serializable
                 # s_tmax can be float('inf') which is not serializable, so we convert it to the max float value
                 s_tmax = payload.get('s_tmax', 0.0)
-                if s_tmax > 1e308:
+                if s_tmax is not None and s_tmax > 1e308:
                     payload['s_tmax'] = 1e308
                 # remove unserializable caches
                 payload.pop('cached_uc', None)
@@ -490,11 +490,7 @@ class Worker:
 
             except Exception as e:
                 self.set_state(State.IDLE)
-
-                if payload['batch_size'] == 0:
-                    raise InvalidWorkerResponse("Tried to request a null amount of images")
-                else:
-                    raise InvalidWorkerResponse(e)
+                raise InvalidWorkerResponse(e)
 
         except requests.RequestException:
             self.set_state(State.UNAVAILABLE)

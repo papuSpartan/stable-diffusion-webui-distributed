@@ -45,6 +45,7 @@ class Job:
         self.batch_size: int = batch_size
         self.complementary: bool = False
         self.step_override = None
+        self.thread = None
 
     def __str__(self):
         prefix = ''
@@ -373,7 +374,7 @@ class World:
 
         batch_size = self.default_batch_size()
         for worker in self.get_workers():
-            if worker.state != State.DISABLED and worker.state != State.UNAVAILABLE:
+            if worker.state not in (State.DISABLED, State.UNAVAILABLE):
                 if worker.avg_ipm is None or worker.avg_ipm <= 0:
                     logger.debug(f"No recorded speed for worker '{worker.label}, benchmarking'")
                     worker.benchmark()
@@ -401,7 +402,7 @@ class World:
                 continue
             if worker.master and self.thin_client_mode:
                 continue
-            if worker.state != State.UNAVAILABLE and worker.state != State.DISABLED:
+            if worker.state not in (State.UNAVAILABLE, State.DISABLED):
                 filtered.append(worker)
 
         return filtered
@@ -550,17 +551,7 @@ class World:
         else:
             logger.debug("complementary image production is disabled")
 
-        iterations = payload['n_iter']
-        num_returning = self.get_current_output_size()
-        num_complementary = num_returning - self.p.batch_size
-        distro_summary = "Job distribution:\n"
-        distro_summary += f"{self.p.batch_size} * {iterations} iteration(s)"
-        if num_complementary > 0:
-            distro_summary += f" + {num_complementary} complementary"
-        distro_summary += f": {num_returning} images total\n"
-        for job in self.jobs:
-            distro_summary += f"'{job.worker.label}' - {job.batch_size * iterations} image(s) @ {job.worker.avg_ipm:.2f} ipm\n"
-        logger.info(distro_summary)
+        logger.info(self.distro_summary(payload))
 
         if self.thin_client_mode is True or self.master_job().batch_size == 0:
             # save original process_images_inner for later so we can restore once we're done
@@ -584,6 +575,20 @@ class World:
             if self.jobs[last].batch_size < 1:
                 del self.jobs[last]
             last -= 1
+
+    def distro_summary(self, payload):
+        # iterations = dict(payload)['n_iter']
+        iterations = self.p.n_iter
+        num_returning = self.get_current_output_size()
+        num_complementary = num_returning - self.p.batch_size
+        distro_summary = "Job distribution:\n"
+        distro_summary += f"{self.p.batch_size} * {iterations} iteration(s)"
+        if num_complementary > 0:
+            distro_summary += f" + {num_complementary} complementary"
+        distro_summary += f": {num_returning} images total\n"
+        for job in self.jobs:
+            distro_summary += f"'{job.worker.label}' - {job.batch_size * iterations} image(s) @ {job.worker.avg_ipm:.2f} ipm\n"
+        return distro_summary
 
     def config(self) -> dict:
         """
@@ -660,8 +665,8 @@ class World:
             fields['verify_remotes'] = self.verify_remotes
             # cast enum id to actual enum type and then prime state
             fields['state'] = State(fields['state'])
-            if fields['state'] != State.DISABLED:
-                fields['state'] = State.IDLE
+            if fields['state'] not in (State.DISABLED, State.UNAVAILABLE):
+                    fields['state'] = State.IDLE
 
             self.add_worker(**fields)
 
@@ -740,6 +745,9 @@ class World:
                     msg = f"worker '{worker.label}' is unreachable"
                     logger.info(msg)
                     gradio.Warning("Distributed: "+msg)
+                    worker.set_state(State.UNAVAILABLE)
+
+                self.save_config()
 
     def restart_all(self):
         for worker in self._workers:
