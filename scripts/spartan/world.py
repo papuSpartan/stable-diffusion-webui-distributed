@@ -18,8 +18,9 @@ from . import shared as sh
 from .pmodels import ConfigModel, Benchmark_Payload
 from .shared import logger, extension_path
 from .worker import Worker, State
-from modules.call_queue import wrap_queued_call
+from modules.call_queue import wrap_queued_call, queue_lock
 from modules import processing
+from modules import progress
 
 
 class NotBenchmarked(Exception):
@@ -44,6 +45,7 @@ class Job:
         self.batch_size: int = batch_size
         self.complementary: bool = False
         self.step_override = None
+        self.thread = None
 
     def __str__(self):
         prefix = ''
@@ -160,13 +162,7 @@ class World:
             return new
         else:
             for key in kwargs:
-                if hasattr(original, key):
-                    # TODO only necessary because this is skipping Worker.__init__ and the pyd model is saving the state as an int instead of an actual enum
-                    if key == 'state':
-                        original.state = kwargs[key] if type(kwargs[key]) is State else State(kwargs[key])
-                        continue
-
-                    setattr(original, key, kwargs[key])
+                setattr(original, key, kwargs[key])
 
             return original
 
@@ -186,29 +182,22 @@ class World:
             Thread(target=worker.refresh_checkpoints, args=()).start()
 
     def sample_master(self) -> float:
-        # wrap our benchmark payload
-        master_bench_payload = StableDiffusionProcessingTxt2Img()
+        p = StableDiffusionProcessingTxt2Img()
         d = sh.benchmark_payload.dict()
         for key in d:
-            setattr(master_bench_payload, key, d[key])
+            setattr(p, key, d[key])
+        p.do_not_save_samples = True
 
-        # Keeps from trying to save the images when we don't know the path. Also, there's not really any reason to.
-        master_bench_payload.do_not_save_samples = True
-        # shared.state.begin(job='distributed_master_bench')
-        wrapped = (wrap_queued_call(process_images))
         start = time.time()
-        wrapped(master_bench_payload)
-        # wrap_gradio_gpu_call(process_images)(master_bench_payload)
-        # shared.state.end()
-
+        process_images(p)
         return time.time() - start
-
 
     def benchmark(self, rebenchmark: bool = False):
         """
         Attempts to benchmark all workers a part of the world.
         """
 
+        local_task_id = 'task(distributed_bench)'
         unbenched_workers = []
         if rebenchmark:
             for worker in self._workers:
@@ -247,26 +236,42 @@ class World:
             futures.clear()
 
             # benchmark those that haven't been
-            for worker in unbenched_workers:
-                if worker.state in (State.DISABLED, State.UNAVAILABLE):
-                    logger.debug(f"worker '{worker.label}' is {worker.state}, refusing to benchmark")
-                    continue
+            if len(unbenched_workers) > 0:
+                queue_lock.acquire()
+                gradio.Info("Distributed: benchmarking in progress, please wait")
+                for worker in unbenched_workers:
+                    if worker.state in (State.DISABLED, State.UNAVAILABLE):
+                        logger.debug(f"worker '{worker.label}' is {worker.state.name}, refusing to benchmark")
+                        continue
 
-                if worker.model_override is not None:
-                    logger.warning(f"model override is enabled for worker '{worker.label}' which may result in poor optimization\n"
-                                   f"*all workers should be evaluated against the same model")
+                    if worker.model_override is not None:
+                        logger.warning(f"model override is enabled for worker '{worker.label}' which may result in poor optimization\n"
+                                       f"*all workers should be evaluated against the same model")
 
-                chosen = worker.benchmark if not worker.master else worker.benchmark(sample_function=self.sample_master)
-                futures.append(executor.submit(chosen, worker))
-                logger.info(f"benchmarking worker '{worker.label}'")
+                    if worker.master:
+                        if progress.current_task is None:
+                            progress.add_task_to_queue(local_task_id)
+                            progress.start_task(local_task_id)
+                            shared.state.begin(job=local_task_id)
+                            shared.state.job_count = sh.warmup_samples + sh.samples
 
-            # wait for all benchmarks to finish and update stats on newly benchmarked workers
-            concurrent.futures.wait(futures)
-            logger.info("benchmarking finished")
+                    chosen = worker.benchmark if not worker.master else worker.benchmark(sample_function=self.sample_master)
+                    futures.append(executor.submit(chosen, worker))
+                    logger.info(f"benchmarking worker '{worker.label}'")
 
-            # save benchmark results to workers.json
-            self.save_config()
-            logger.info(self.speed_summary())
+            if len(futures) > 0:
+                # wait for all benchmarks to finish and update stats on newly benchmarked workers
+                concurrent.futures.wait(futures)
+
+                if progress.current_task == local_task_id:
+                    shared.state.end()
+                    progress.finish_task(local_task_id)
+                    queue_lock.release()
+
+                logger.info("benchmarking finished")
+                logger.info(self.speed_summary())
+                gradio.Info("Distributed: benchmarking complete!")
+                self.save_config()
 
     def get_current_output_size(self) -> int:
         """
@@ -369,7 +374,7 @@ class World:
 
         batch_size = self.default_batch_size()
         for worker in self.get_workers():
-            if worker.state != State.DISABLED and worker.state != State.UNAVAILABLE:
+            if worker.state not in (State.DISABLED, State.UNAVAILABLE):
                 if worker.avg_ipm is None or worker.avg_ipm <= 0:
                     logger.debug(f"No recorded speed for worker '{worker.label}, benchmarking'")
                     worker.benchmark()
@@ -379,15 +384,15 @@ class World:
 
     def update(self, p):
         """preps world for another run"""
-        if not self.initialized:
-            self.benchmark()
-            self.initialized = True
-            logger.debug("world initialized!")
-        else:
-            logger.debug("world was already initialized")
 
         self.p = p
+        self.benchmark()
         self.make_jobs()
+
+        if not self.initialized:
+            self.initialized = True
+            logger.debug("world initialized!")
+
 
     def get_workers(self):
         filtered: List[Worker] = []
@@ -397,7 +402,7 @@ class World:
                 continue
             if worker.master and self.thin_client_mode:
                 continue
-            if worker.state != State.UNAVAILABLE and worker.state != State.DISABLED:
+            if worker.state not in (State.UNAVAILABLE, State.DISABLED):
                 filtered.append(worker)
 
         return filtered
@@ -535,7 +540,7 @@ class World:
                     seconds_per_sample = job.worker.eta(payload=payload, batch_size=1, samples=1)
                     realtime_samples = slack_time // seconds_per_sample
                     logger.debug(
-                        f"job for '{job.worker.label}' downscaled to {realtime_samples} samples to meet time constraints\n"
+                        f"job for '{job.worker.label}' downscaled to {realtime_samples:.0f} samples to meet time constraints\n"
                         f"{realtime_samples:.0f} samples = {slack_time:.2f}s slack ÷ {seconds_per_sample:.2f}s/sample\n"
                         f"  step reduction: {payload['steps']} -> {realtime_samples:.0f}"
                     )
@@ -546,17 +551,7 @@ class World:
         else:
             logger.debug("complementary image production is disabled")
 
-        iterations = payload['n_iter']
-        num_returning = self.get_current_output_size()
-        num_complementary = num_returning - self.p.batch_size
-        distro_summary = "Job distribution:\n"
-        distro_summary += f"{self.p.batch_size} * {iterations} iteration(s)"
-        if num_complementary > 0:
-            distro_summary += f" + {num_complementary} complementary"
-        distro_summary += f": {num_returning} images total\n"
-        for job in self.jobs:
-            distro_summary += f"'{job.worker.label}' - {job.batch_size * iterations} image(s) @ {job.worker.avg_ipm:.2f} ipm\n"
-        logger.info(distro_summary)
+        logger.info(self.distro_summary(payload))
 
         if self.thin_client_mode is True or self.master_job().batch_size == 0:
             # save original process_images_inner for later so we can restore once we're done
@@ -580,6 +575,20 @@ class World:
             if self.jobs[last].batch_size < 1:
                 del self.jobs[last]
             last -= 1
+
+    def distro_summary(self, payload):
+        # iterations = dict(payload)['n_iter']
+        iterations = self.p.n_iter
+        num_returning = self.get_current_output_size()
+        num_complementary = num_returning - self.p.batch_size
+        distro_summary = "Job distribution:\n"
+        distro_summary += f"{self.p.batch_size} * {iterations} iteration(s)"
+        if num_complementary > 0:
+            distro_summary += f" + {num_complementary} complementary"
+        distro_summary += f": {num_returning} images total\n"
+        for job in self.jobs:
+            distro_summary += f"'{job.worker.label}' - {job.batch_size * iterations} image(s) @ {job.worker.avg_ipm:.2f} ipm\n"
+        return distro_summary
 
     def config(self) -> dict:
         """
@@ -654,6 +663,10 @@ class World:
             fields['label'] = label
             # TODO must be overridden everytime here or later converted to a config file variable at some point
             fields['verify_remotes'] = self.verify_remotes
+            # cast enum id to actual enum type and then prime state
+            fields['state'] = State(fields['state'])
+            if fields['state'] not in (State.DISABLED, State.UNAVAILABLE):
+                    fields['state'] = State.IDLE
 
             self.add_worker(**fields)
 
@@ -663,11 +676,11 @@ class World:
         self.complement_production = config.complement_production
         self.step_scaling = config.step_scaling
 
-        logger.debug("config loaded")
+        logger.debug(f"config loaded from '{os.path.abspath(self.config_path)}'")
 
     def save_config(self):
         """
-        Saves the config file.
+        Saves current state to the config file.
         """
 
         config = ConfigModel(
@@ -727,11 +740,14 @@ class World:
                     msg = f"worker '{worker.label}' is online"
                     logger.info(msg)
                     gradio.Info("Distributed: "+msg)
-                    worker.state = State.IDLE
+                    worker.set_state(State.IDLE, expect_cycle=True)
                 else:
                     msg = f"worker '{worker.label}' is unreachable"
                     logger.info(msg)
                     gradio.Warning("Distributed: "+msg)
+                    worker.set_state(State.UNAVAILABLE)
+
+                self.save_config()
 
     def restart_all(self):
         for worker in self._workers:

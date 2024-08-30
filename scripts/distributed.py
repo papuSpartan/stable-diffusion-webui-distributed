@@ -24,7 +24,7 @@ from modules.shared import state as webui_state
 from scripts.spartan.control_net import pack_control_net
 from scripts.spartan.shared import logger
 from scripts.spartan.ui import UI
-from scripts.spartan.world import World
+from scripts.spartan.world import World, State
 
 old_sigint_handler = signal.getsignal(signal.SIGINT)
 old_sigterm_handler = signal.getsignal(signal.SIGTERM)
@@ -33,7 +33,6 @@ old_sigterm_handler = signal.getsignal(signal.SIGTERM)
 # noinspection PyMissingOrEmptyDocstring
 class DistributedScript(scripts.Script):
     # global old_sigterm_handler, old_sigterm_handler
-    worker_threads: List[Thread] = []
     # Whether to verify worker certificates. Can be useful if your remotes are self-signed.
     verify_remotes = not cmd_opts.distributed_skip_verify_remotes
     master_start = None
@@ -150,17 +149,19 @@ class DistributedScript(scripts.Script):
 
         # wait for response from all workers
         webui_state.textinfo = "Distributed - receiving results"
-        for thread in self.worker_threads:
-            logger.debug(f"waiting for worker thread '{thread.name}'")
-            thread.join()
-        self.worker_threads.clear()
+        for job in self.world.jobs:
+            if job.thread is None:
+                continue
+
+            logger.debug(f"waiting for worker thread '{job.thread.name}'")
+            job.thread.join()
         logger.debug("all worker request threads returned")
         webui_state.textinfo = "Distributed - injecting images"
 
         # some worker which we know has a good response that we can use for generating the grid
         donor_worker = None
         for job in self.world.jobs:
-            if job.batch_size < 1 or job.worker.master:
+            if job.worker.response is None or job.batch_size < 1 or job.worker.master:
                 continue
 
             try:
@@ -197,7 +198,7 @@ class DistributedScript(scripts.Script):
             return
 
         # generate and inject grid
-        if opts.return_grid:
+        if opts.return_grid and len(processed.images) > 1:
             grid = image_grid(processed.images, len(processed.images))
             processed_inject_image(
                 image=grid,
@@ -304,6 +305,9 @@ class DistributedScript(scripts.Script):
             return
 
         for job in self.world.jobs:
+            if job.worker.state in (State.UNAVAILABLE, State.DISABLED):
+                continue
+
             payload_temp = copy.copy(payload)
             del payload_temp['scripts_value']
             payload_temp = copy.deepcopy(payload_temp)
@@ -332,11 +336,9 @@ class DistributedScript(scripts.Script):
                 job.worker.loaded_model = name
                 job.worker.loaded_vae = vae
 
-            t = Thread(target=job.worker.request, args=(payload_temp, option_payload, sync,),
+            job.thread = Thread(target=job.worker.request, args=(payload_temp, option_payload, sync,),
                        name=f"{job.worker.label}_request")
-
-            t.start()
-            self.worker_threads.append(t)
+            job.thread.start()
             started_jobs.append(job)
 
         # if master batch size was changed again due to optimization change it to the updated value
@@ -358,6 +360,8 @@ class DistributedScript(scripts.Script):
 
         # restore process_images_inner if it was monkey-patched
         processing.process_images_inner = self.original_process_images_inner
+        # save any dangling state to prevent load_config in next iteration overwriting it
+        self.world.save_config()
 
     @staticmethod
     def signal_handler(sig, frame):
