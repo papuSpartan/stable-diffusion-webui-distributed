@@ -1,6 +1,12 @@
 # Change Log
 Formatting: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
+## [2.2.2] - 2024-8-30
+
+### Fixed
+
+- Unavailable state sometimes being ignored
+
 ## [2.2.1] - 2024-5-16
 
 ### Fixed
