@@ -361,6 +361,7 @@ class Worker:
                     mode = 'img2img'  # for use in checking script compat
                     images = []
                     for image in init_images:
+                        # looks redundant when encode_pil...() could be used, but it does not support all file formats. E.g. AVIF
                         buffer = io.BytesIO()
                         image.save(buffer, format="PNG")
                         image = 'data:image/png;base64,' + str(base64.b64encode(buffer.getvalue()), 'utf-8')
