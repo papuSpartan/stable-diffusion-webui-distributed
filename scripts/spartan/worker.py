@@ -665,7 +665,7 @@ class Worker:
             )
         except requests.exceptions.RequestException:
             self.set_state(State.UNAVAILABLE)
-            logger.debug(f"{failure_msg} (connection error... OOM?)")
+            logger.error(f"{failure_msg} (connection error... OOM?)")
             return
 
         elapsed = time.time() - start
