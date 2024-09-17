@@ -641,6 +641,7 @@ class Worker:
             return []
 
     def load_options(self, model, vae=None):
+        failure_msg = f"failed to load options for worker '{self.label}'"
         if self.master:
             return
 
@@ -654,17 +655,25 @@ class Worker:
         if vae is not None:
             payload['sd_vae'] = vae
 
-        self.set_state(State.WORKING)
+        state_cache = self.state
+        self.set_state(State.WORKING, expect_cycle=True) # may already be WORKING if called by worker.request()
         start = time.time()
-        response = self.session.post(
-            self.full_url("options"),
-            json=payload
-        )
+        try:
+            response = self.session.post(
+                self.full_url("options"),
+                json=payload
+            )
+        except requests.exceptions.RequestException:
+            self.set_state(State.UNAVAILABLE)
+            logger.debug(f"{failure_msg} (connection error... OOM?)")
+            return
+
         elapsed = time.time() - start
-        self.set_state(State.IDLE)
+        if state_cache != State.WORKING: # see above comment, this lets caller determine when worker is IDLE
+            self.set_state(State.IDLE)
 
         if response.status_code != 200:
-            logger.debug(f"failed to load options for worker '{self.label}'")
+            logger.debug(failure_msg)
         else:
             logger.debug(f"worker '{self.label}' loaded weights in {elapsed:.2f}s")
             self.loaded_model = model_name
