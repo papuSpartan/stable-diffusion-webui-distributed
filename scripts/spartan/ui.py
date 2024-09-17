@@ -236,8 +236,8 @@ class UI:
                         info='top-most message is newest'
                     )
 
-                    refresh_status_btn = gradio.Button(value='Refresh 🔄', size='sm')
-                    refresh_status_btn.click(self.status_btn, inputs=[], outputs=[jobs, status, logs])
+                    refresh_status_btn = gradio.Button(value='Refresh 🔄', size='sm', elem_id='distributed-refresh-status', visible=False)
+                    refresh_status_btn.click(self.status_btn, inputs=[], outputs=[jobs, status, logs], show_progress=False)
 
                     status_tab.select(fn=self.status_btn, inputs=[], outputs=[jobs, status, logs])
                     components += [status, jobs, logs, refresh_status_btn]
