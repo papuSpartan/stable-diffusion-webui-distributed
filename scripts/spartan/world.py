@@ -103,7 +103,6 @@ class World:
     def __repr__(self):
         return f"{len(self._workers)} workers"
 
-
     def default_batch_size(self) -> int:
         """the amount of images/total images requested that a worker would compute if conditions were perfect and
         each worker generated at the same speed. assumes one batch only"""
@@ -392,7 +391,6 @@ class World:
         if not self.initialized:
             self.initialized = True
             logger.debug("world initialized!")
-
 
     def get_workers(self):
         filtered: List[Worker] = []
@@ -752,7 +750,6 @@ class World:
     def restart_all(self):
         for worker in self._workers:
             worker.restart()
-
 
     def inject_model_dropdown_handler(self):
         if self.config().get('enabled', False): # TODO avoid access from config()

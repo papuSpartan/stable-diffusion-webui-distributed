@@ -6,8 +6,14 @@ function confirm_restart_workers(_) {
 // live updates
 function update() {
     try {
-        let refresh_button = document.getElementById('distributed-refresh-status')
-        refresh_button.click()
+        let currentTab = get_uiCurrentTabContent()
+        let buttons = document.querySelectorAll('#distributed-refresh-status')
+        for(let i = 0; i < buttons.length; i++) {
+            if(currentTab.contains(buttons[i])) {
+                buttons[i].click()
+                break
+            }
+        }
     } catch (e) {
         if (!(e instanceof TypeError)) {
             throw e
