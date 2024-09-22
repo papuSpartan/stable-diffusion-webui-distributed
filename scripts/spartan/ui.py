@@ -9,6 +9,7 @@ from .shared import logger, LOG_LEVEL, gui_handler
 from .worker import State
 from modules.call_queue import queue_lock
 from modules import progress
+from modules.ui_components import InputAccordion
 
 worker_select_dropdown = None
 
@@ -210,15 +211,9 @@ class UI:
         components = []
 
         with gradio.Blocks(variant='compact'):  # Group() and Box() remove spacing
-            with gradio.Accordion(label='Distributed', open=False):
-                # https://github.com/AUTOMATIC1111/stable-diffusion-webui/issues/6109#issuecomment-1403315784
-                main_toggle = gradio.Checkbox(  # main on/off ext. toggle
-                    elem_id='enable',
-                    label='Enable',
-                    value=self.world.enabled if self.world.enabled is not None else True,
-                    interactive=True
-                )
+            with InputAccordion(label='Distributed', open=False, value=self.world.config().get('enabled', False), elem_id='enable') as main_toggle:
                 main_toggle.input(self.main_toggle_btn)
+                setattr(main_toggle.accordion, 'do_not_save_to_config', True) # InputAccordion is really a CheckBox
                 components.append(main_toggle)
 
                 with gradio.Tab('Status') as status_tab:
