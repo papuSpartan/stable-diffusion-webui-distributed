@@ -15,6 +15,7 @@ from modules.shared import cmd_opts
 from modules.shared import state as master_state
 from . import shared as sh
 from .shared import logger, warmup_samples, LOG_LEVEL
+from PIL import Image
 
 try:
     from webui import server_name
@@ -38,6 +39,13 @@ class State(Enum):
     INTERRUPTED = 3
     UNAVAILABLE = 4
     DISABLED = 5
+
+
+# looks redundant when encode_pil...() could be used, but it does not support all file formats. E.g. AVIF
+def pil_to_64(image: Image) -> str:
+     buffer = io.BytesIO()
+     image.save(buffer, format="PNG")
+     return 'data:image/png;base64,' + str(base64.b64encode(buffer.getvalue()), 'utf-8')
 
 
 class Worker:
@@ -361,11 +369,7 @@ class Worker:
                     mode = 'img2img'  # for use in checking script compat
                     images = []
                     for image in init_images:
-                        # looks redundant when encode_pil...() could be used, but it does not support all file formats. E.g. AVIF
-                        buffer = io.BytesIO()
-                        image.save(buffer, format="PNG")
-                        image = 'data:image/png;base64,' + str(base64.b64encode(buffer.getvalue()), 'utf-8')
-                        images.append(image)
+                        images.append(pil_to_64(image))
                     payload['init_images'] = images
 
                 alwayson_scripts = payload.get('alwayson_scripts', None)  # key may not always exist, benchmarking being one example
@@ -402,9 +406,7 @@ class Worker:
                 # if an image mask is present
                 image_mask = payload.get('image_mask', None)
                 if image_mask is not None:
-                    image_b64 = encode_pil_to_base64(image_mask)
-                    image_b64 = str(image_b64, 'utf-8')
-                    payload['mask'] = image_b64
+                    payload['mask'] = pil_to_64(image_mask)
                     del payload['image_mask']
 
                 # see if there is anything else wrong with serializing to payload
