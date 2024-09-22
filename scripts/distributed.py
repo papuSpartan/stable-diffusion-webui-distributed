@@ -61,7 +61,7 @@ class DistributedScript(scripts.Script):
         return scripts.AlwaysVisible
 
     def ui(self, is_img2img):
-        extension_ui = UI(world=self.world)
+        extension_ui = UI(world=self.world, is_img2img=is_img2img)
         # root, api_exposed = extension_ui.create_ui()
         components = extension_ui.create_ui()
 
@@ -218,8 +218,12 @@ class DistributedScript(scripts.Script):
     # p's type is
     # "modules.processing.StableDiffusionProcessing*"
     def before_process(self, p, *args):
-        if not self.world.enabled:
-            logger.debug("extension is disabled")
+        is_img2img = getattr(p, 'init_images', False)
+        if is_img2img and self.world.enabled_i2i is False:
+            logger.debug("extension is disabled for i2i")
+            return
+        elif not is_img2img and self.world.enabled is False:
+            logger.debug("extension is disabled for t2i")
             return
         self.world.update(p)
 
@@ -352,7 +356,10 @@ class DistributedScript(scripts.Script):
         return
 
     def postprocess(self, p, processed, *args):
-        if not self.world.enabled:
+        is_img2img = getattr(p, 'init_images', False)
+        if is_img2img and self.world.enabled_i2i is False:
+            return
+        elif not is_img2img and self.world.enabled is False:
             return
 
         if self.master_start is not None:

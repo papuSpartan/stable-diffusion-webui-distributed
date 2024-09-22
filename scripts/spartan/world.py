@@ -91,6 +91,7 @@ class World:
         self.verify_remotes = verify_remotes
         self.thin_client_mode = False
         self.enabled = True
+        self.enabled_i2i = True
         self.is_dropdown_handler_injected = False
         self.complement_production = True
         self.step_scaling = False
@@ -671,6 +672,7 @@ class World:
         sh.benchmark_payload = Benchmark_Payload(**config.benchmark_payload)
         self.job_timeout = config.job_timeout
         self.enabled = config.enabled
+        self.enabled_i2i = config.enabled_i2i
         self.complement_production = config.complement_production
         self.step_scaling = config.step_scaling
 
@@ -686,6 +688,7 @@ class World:
             benchmark_payload=sh.benchmark_payload,
             job_timeout=self.job_timeout,
             enabled=self.enabled,
+            enabled_i2i=self.enabled_i2i,
             complement_production=self.complement_production,
             step_scaling=self.step_scaling
         )

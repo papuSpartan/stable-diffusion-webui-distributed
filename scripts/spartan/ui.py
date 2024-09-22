@@ -17,9 +17,10 @@ worker_select_dropdown = None
 class UI:
     """extension user interface related things"""
 
-    def __init__(self, world):
+    def __init__(self, world, is_img2img):
         self.world = world
         self.original_model_dropdown_handler = opts.data_labels.get('sd_model_checkpoint').onchange
+        self.is_img2img = is_img2img
 
     # handlers
     @staticmethod
@@ -186,11 +187,15 @@ class UI:
         self.world.save_config()
 
     def main_toggle_btn(self):
-        self.world.enabled = not self.world.enabled
+        if self.is_img2img:
+            self.world.enabled_i2i = not self.world.enabled_i2i
+        else:
+            self.world.enabled = not self.world.enabled
+
         self.world.save_config()
 
         # restore vanilla sdwui handler for model dropdown if extension is disabled or inject if otherwise
-        if not self.world.enabled:
+        if not self.world.enabled and not self.world.enabled_i2i:
             model_dropdown = opts.data_labels.get('sd_model_checkpoint')
             if self.original_model_dropdown_handler is not None:
                 model_dropdown.onchange = self.original_model_dropdown_handler
@@ -209,9 +214,12 @@ class UI:
     def create_ui(self):
         """creates the extension UI and returns relevant components"""
         components = []
+        elem_id = 'enabled'
+        if self.is_img2img:
+            elem_id += '_i2i'
 
         with gradio.Blocks(variant='compact'):  # Group() and Box() remove spacing
-            with InputAccordion(label='Distributed', open=False, value=self.world.config().get('enabled', False), elem_id='enable') as main_toggle:
+            with InputAccordion(label='Distributed', open=False, value=self.world.config().get(elem_id), elem_id=elem_id) as main_toggle:
                 main_toggle.input(self.main_toggle_btn)
                 setattr(main_toggle.accordion, 'do_not_save_to_config', True) # InputAccordion is really a CheckBox
                 components.append(main_toggle)
