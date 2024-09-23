@@ -206,6 +206,7 @@ class DistributedScript(scripts.Script):
             worker.response = None
 
         p.batch_size = len(pp.images)
+        webui_state.textinfo = ""
         return
 
     # p's type is
@@ -230,6 +231,14 @@ class DistributedScript(scripts.Script):
             if script.alwayson is not True:
                 continue
             title = script.title()
+
+            if title == "ADetailer":
+                adetailer_args = p.script_args[script.args_from:script.args_to]
+
+                # InputAccordion main toggle, skip img2img toggle
+                if adetailer_args[0] and adetailer_args[1]:
+                    logger.debug(f"adetailer is skipping img2img, returning control to wui")
+                    return
 
             # check for supported scripts
             if title == "ControlNet":
