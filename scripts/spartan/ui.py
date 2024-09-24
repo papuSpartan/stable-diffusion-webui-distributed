@@ -13,7 +13,6 @@ from modules.ui_components import InputAccordion
 
 worker_select_dropdown = None
 
-
 class UI:
     """extension user interface related things"""
 
@@ -186,11 +185,15 @@ class UI:
             worker.session.auth = (user, password)
         self.world.save_config()
 
-    def main_toggle_btn(self):
+    def main_toggle_btn(self, state):
         if self.is_img2img:
-            self.world.enabled_i2i = not self.world.enabled_i2i
+            if self.world.enabled_i2i == state: # just prevents a redundant config save if ui desyncs
+                return
+            self.world.enabled_i2i = state
         else:
-            self.world.enabled = not self.world.enabled
+            if self.world.enabled == state:
+                return
+            self.world.enabled = state
 
         self.world.save_config()
 
@@ -220,7 +223,7 @@ class UI:
 
         with gradio.Blocks(variant='compact'):  # Group() and Box() remove spacing
             with InputAccordion(label='Distributed', open=False, value=self.world.config().get(elem_id), elem_id=elem_id) as main_toggle:
-                main_toggle.input(self.main_toggle_btn)
+                main_toggle.input(self.main_toggle_btn, inputs=[main_toggle])
                 setattr(main_toggle.accordion, 'do_not_save_to_config', True) # InputAccordion is really a CheckBox
                 components.append(main_toggle)
 
