@@ -46,6 +46,7 @@ class Job:
         self.complementary: bool = False
         self.step_override = None
         self.thread = None
+        self.gallery_map: List[int] = []
 
     def __str__(self):
         prefix = ''
