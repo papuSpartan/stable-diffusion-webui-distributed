@@ -58,6 +58,9 @@ def pack_control_net(cn_units) -> dict:
                 unit['mask'] = mask_b64  # mikubill
                 unit['mask_image'] = mask_b64  # forge
 
+        # TODO serialize ResizeMode and other unserializable attributes
+        # https://github.com/Mikubill/sd-webui-controlnet/wiki/API#examples-1
+
         # avoid returning duplicate detection maps since master should return the same one
         unit['save_detected_map'] = False
         # remove anything unserializable

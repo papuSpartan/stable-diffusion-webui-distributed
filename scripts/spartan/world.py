@@ -114,7 +114,7 @@ class World:
     def size(self) -> int:
         """
         Returns:
-            int: The number of nodes currently registered in the world.
+            int: The number of nodes currently registered in the world and in a valid state
         """
         return len(self.get_workers())
 
@@ -274,7 +274,7 @@ class World:
                 gradio.Info("Distributed: benchmarking complete!")
                 self.save_config()
 
-    def get_current_output_size(self) -> int:
+    def num_requested(self) -> int:
         """
         returns how many images would be returned from all jobs
         """
@@ -285,6 +285,11 @@ class World:
             num_images += job.batch_size
 
         return num_images
+
+    def num_total(self) -> int:
+        """how many images should be returned in total, so including local generations and its grid"""
+
+        return self.num_requested() * self.p.n_iter + shared.opts.return_grid
 
     def speed_summary(self) -> str:
         """
@@ -472,7 +477,7 @@ class World:
         #######################
 
         # when total number of requested images was not cleanly divisible by world size then we tack the remainder on
-        remainder_images = self.p.batch_size - self.get_current_output_size()
+        remainder_images = self.p.batch_size - self.num_requested()
         if remainder_images >= 1:
             logger.debug(f"The requested number of images({self.p.batch_size}) was not cleanly divisible by the number of realtime nodes({len(self.realtime_jobs())}) resulting in {remainder_images} that will be redistributed")
 
@@ -551,7 +556,7 @@ class World:
         else:
             logger.debug("complementary image production is disabled")
 
-        logger.info(self.distro_summary(payload))
+        logger.info(self.distro_summary())
 
         if self.thin_client_mode is True or self.master_job().batch_size == 0:
             # save original process_images_inner for later so we can restore once we're done
@@ -576,18 +581,17 @@ class World:
                 del self.jobs[last]
             last -= 1
 
-    def distro_summary(self, payload):
-        # iterations = dict(payload)['n_iter']
-        iterations = self.p.n_iter
-        num_returning = self.get_current_output_size()
+    def distro_summary(self):
+        num_returning = self.num_requested()
         num_complementary = num_returning - self.p.batch_size
+
         distro_summary = "Job distribution:\n"
-        distro_summary += f"{self.p.batch_size} * {iterations} iteration(s)"
+        distro_summary += f"{self.p.batch_size} * {self.p.n_iter} iteration(s)"
         if num_complementary > 0:
             distro_summary += f" + {num_complementary} complementary"
-        distro_summary += f": {num_returning} images total\n"
+        distro_summary += f": {num_returning * self.p.n_iter} images total\n"
         for job in self.jobs:
-            distro_summary += f"'{job.worker.label}' - {job.batch_size * iterations} image(s) @ {job.worker.avg_ipm:.2f} ipm\n"
+            distro_summary += f"'{job.worker.label}' - {job.batch_size * self.p.n_iter} image(s) @ {job.worker.avg_ipm:.2f} ipm\n"
         return distro_summary
 
     def config(self) -> dict:

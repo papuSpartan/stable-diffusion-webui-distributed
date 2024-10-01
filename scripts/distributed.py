@@ -116,26 +116,19 @@ class DistributedScript(scripts.Script):
         p.negative_prompts.extend(all_negative_prompts)
         p.prompts.extend(all_prompts)
 
-        for image in images:
-            pp.images.append(image) # add one image to the gallery
-
+        num_local = self.world.p.n_iter * self.world.p.batch_size + opts.return_grid
+        num_injected = len(pp.images) - self.world.p.batch_size
+        for i, image in enumerate(images):
             # modules.ui_common -> update_generation_info renders to html below gallery
-            images_per_batch = p.n_iter * p.batch_size
-            # zero-indexed position of image in gallery (so including master/local results)
-            true_image_pos = (len(pp.images) - 1) + (not p.do_not_save_grid)
-            num_remote_images = images_per_batch * p.batch_size # the **expected** amount of remote images
-            if p.n_iter > 1:  # if splitting by batch count
-                num_remote_images *= p.n_iter - 1
 
-            # TODO slightly off from changes
-            logger.debug(f"image {true_image_pos + 1}/{(self.world.p.batch_size * p.n_iter) + (not p.do_not_save_grid) + 1}, "
-                         f"info-index: fix me")
-
+            # TODO probably shouldn't be here
             if self.world.thin_client_mode:
                 p.all_negative_prompts = pp.all_negative_prompts
 
-            # saves final position of image in gallery so that we can later modify the correct infotext
-            job.gallery_map.append(true_image_pos)
+            gallery_index = num_local + num_injected + i # zero-indexed point of image in total gallery
+            job.gallery_map.append(gallery_index) # so we know where to edit infotext
+            pp.images.append(image)
+            logger.debug(f"image {gallery_index + 1}/{self.world.num_total()}")
 
     def update_gallery(self, pp, p):
         """adds all remotely generated images to the image gallery after waiting for all workers to finish"""
@@ -341,6 +334,9 @@ class DistributedScript(scripts.Script):
         return
 
     def postprocess_batch_list(self, p, pp, *args, **kwargs):
+        if p.n_iter != kwargs['batch_number'] + 1: # skip if not the final batch
+            return
+
         is_img2img = getattr(p, 'init_images', False)
         if is_img2img and self.world.enabled_i2i is False:
             return
@@ -356,8 +352,6 @@ class DistributedScript(scripts.Script):
             if job.worker.response is not None:
                 for i, v in enumerate(job.gallery_map):
                     infotext = json.loads(job.worker.response['info'])['infotexts'][i]
-                    logger.debug(f"replacing image {v}'s infotext with\n"
-                                    f"> '{infotext}'")
                     infotext += f", Worker Label: {job.worker.label}"
                     processed.infotexts[v] = infotext
 
