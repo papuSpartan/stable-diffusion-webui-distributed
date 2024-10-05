@@ -286,8 +286,8 @@ class World:
 
         return num_images
 
-    def num_total(self) -> int:
-        """how many images should be returned in total, so including local generations and its grid"""
+    def num_gallery(self) -> int:
+        """How many images should appear in the gallery. This includes local generations and a grid(if enabled)"""
 
         return self.num_requested() * self.p.n_iter + shared.opts.return_grid
 

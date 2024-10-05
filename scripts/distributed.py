@@ -128,7 +128,7 @@ class DistributedScript(scripts.Script):
             gallery_index = num_local + num_injected + i # zero-indexed point of image in total gallery
             job.gallery_map.append(gallery_index) # so we know where to edit infotext
             pp.images.append(image)
-            logger.debug(f"image {gallery_index + 1}/{self.world.num_total()}")
+            logger.debug(f"image {gallery_index + 1}/{self.world.num_gallery()}")
 
     def update_gallery(self, pp, p):
         """adds all remotely generated images to the image gallery after waiting for all workers to finish"""
