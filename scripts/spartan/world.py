@@ -674,7 +674,7 @@ class World:
 
             self.add_worker(**fields)
 
-        sh.benchmark_payload = Benchmark_Payload(**config.benchmark_payload)
+        sh.benchmark_payload = Benchmark_Payload(**config.benchmark_payload.dict())
         self.job_timeout = config.job_timeout
         self.enabled = config.enabled
         self.enabled_i2i = config.enabled_i2i
@@ -699,7 +699,7 @@ class World:
         )
 
         with open(self.config_path, 'w+') as config_file:
-            config_file.write(config.json(indent=3))
+            config_file.write(config.model_dump_json(indent=3))
             logger.debug(f"config saved")
 
     def ping_remotes(self, indiscriminate: bool = False):
