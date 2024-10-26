@@ -21,6 +21,9 @@ from .worker import Worker, State
 from modules.call_queue import wrap_queued_call, queue_lock
 from modules import processing
 from modules import progress
+from modules.scripts import PostprocessBatchListArgs
+from torchvision.transforms import ToPILImage
+from modules.images import image_grid
 
 
 class NotBenchmarked(Exception):
@@ -562,15 +565,31 @@ class World:
             # save original process_images_inner for later so we can restore once we're done
             logger.debug(f"bypassing local generation completely")
             def process_images_inner_bypass(p) -> processing.Processed:
+                p.seeds, p.subseeds, p.negative_prompts, p.prompts = [], [], [], []
+                pp = PostprocessBatchListArgs(images=[])
+                self.p.scripts.postprocess_batch_list(p, pp)
+
                 processed = processing.Processed(p, [], p.seed, info="")
-                processed.all_prompts = []
-                processed.all_seeds = []
-                processed.all_subseeds = []
-                processed.all_negative_prompts = []
-                processed.infotexts = []
-                processed.prompt = None
+                processed.all_prompts = p.prompts
+                processed.all_seeds = p.seeds
+                processed.all_subseeds = p.subseeds
+                processed.all_negative_prompts = p.negative_prompts
+                processed.images = pp.images
+                processed.infotexts = [''] * self.num_requested()
+
+                transform = ToPILImage()
+                for i, image in enumerate(processed.images):
+                    processed.images[i] = transform(image)
+
 
                 self.p.scripts.postprocess(p, processed)
+
+                # generate grid if enabled
+                if shared.opts.return_grid and len(processed.images) > 1:
+                    grid = image_grid(processed.images, len(processed.images))
+                    processed.images.insert(0, grid)
+                    processed.infotexts.insert(0, processed.infotexts[0])
+
                 return processed
             processing.process_images_inner = process_images_inner_bypass
 
@@ -699,7 +718,7 @@ class World:
         )
 
         with open(self.config_path, 'w+') as config_file:
-            config_file.write(config.model_dump_json(indent=3))
+            config_file.write(config.json(indent=3))
             logger.debug(f"config saved")
 
     def ping_remotes(self, indiscriminate: bool = False):
@@ -749,6 +768,9 @@ class World:
                     worker.set_state(State.IDLE, expect_cycle=True)
                 else:
                     msg = f"worker '{worker.label}' is unreachable"
+                    if worker.response.status_code is not None:
+                        msg += f" <{worker.response.status_code}>"
+
                     logger.info(msg)
                     gradio.Warning("Distributed: "+msg)
                     worker.set_state(State.UNAVAILABLE)

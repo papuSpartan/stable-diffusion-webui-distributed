@@ -116,19 +116,14 @@ class DistributedScript(scripts.Script):
         p.negative_prompts.extend(all_negative_prompts)
         p.prompts.extend(all_prompts)
 
-        num_local = self.world.p.n_iter * self.world.p.batch_size + opts.return_grid
+        num_local = self.world.p.n_iter * self.world.p.batch_size + (opts.return_grid - self.world.thin_client_mode)
         num_injected = len(pp.images) - self.world.p.batch_size
         for i, image in enumerate(images):
             # modules.ui_common -> update_generation_info renders to html below gallery
-
-            # TODO probably shouldn't be here
-            if self.world.thin_client_mode:
-                p.all_negative_prompts = pp.all_negative_prompts
-
             gallery_index = num_local + num_injected + i # zero-indexed point of image in total gallery
             job.gallery_map.append(gallery_index) # so we know where to edit infotext
             pp.images.append(image)
-            logger.debug(f"image {gallery_index + 1}/{self.world.num_gallery()}")
+            logger.debug(f"image {gallery_index + 1 + self.world.thin_client_mode}/{self.world.num_gallery()}")
 
     def update_gallery(self, pp, p):
         """adds all remotely generated images to the image gallery after waiting for all workers to finish"""
@@ -328,13 +323,11 @@ class DistributedScript(scripts.Script):
             p.batch_size = self.world.master_job().batch_size
         self.master_start = time.time()
 
-        # generate images assigned to local machine
-        # p.do_not_save_grid = True  # don't generate grid from master as we are doing this later.
         self.runs_since_init += 1
         return
 
     def postprocess_batch_list(self, p, pp, *args, **kwargs):
-        if p.n_iter != kwargs['batch_number'] + 1: # skip if not the final batch
+        if not self.world.thin_client_mode and p.n_iter != kwargs['batch_number'] + 1: # skip if not the final batch
             return
 
         is_img2img = getattr(p, 'init_images', False)

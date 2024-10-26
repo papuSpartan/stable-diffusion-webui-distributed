@@ -609,6 +609,7 @@ class Worker:
                 self.full_url("memory"),
                 timeout=3
             )
+            self.response = response
             return response.status_code == 200
 
         except requests.exceptions.ConnectionError as e:
