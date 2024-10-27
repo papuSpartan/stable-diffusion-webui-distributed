@@ -1,10 +1,23 @@
 # Change Log
 Formatting: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
+## [2.3.0] - 2024-10-26
+
+## Added
+- Compatibility for some extensions which mostly only do postprocessing (e.g. Adetailer)
+- Separate toggle state for img2img tab so txt2img can be enabled and t2i disabled or vice versa
+
+## Changed
+- Status tab will now automatically refresh
+- Main toggle is now in the form of an InputAccordion
+
+## Fixed
+- An issue affecting controlnet and inpainting
+- Toggle state sometimes desyncing when the page was refreshed
+
 ## [2.2.2] - 2024-8-30
 
 ### Fixed
-
 - Unavailable state sometimes being ignored
 
 ## [2.2.1] - 2024-5-16
