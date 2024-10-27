@@ -9,16 +9,17 @@ from .shared import logger, LOG_LEVEL, gui_handler
 from .worker import State
 from modules.call_queue import queue_lock
 from modules import progress
+from modules.ui_components import InputAccordion
 
 worker_select_dropdown = None
-
 
 class UI:
     """extension user interface related things"""
 
-    def __init__(self, world):
+    def __init__(self, world, is_img2img):
         self.world = world
         self.original_model_dropdown_handler = opts.data_labels.get('sd_model_checkpoint').onchange
+        self.is_img2img = is_img2img
 
     # handlers
     @staticmethod
@@ -184,12 +185,20 @@ class UI:
             worker.session.auth = (user, password)
         self.world.save_config()
 
-    def main_toggle_btn(self):
-        self.world.enabled = not self.world.enabled
+    def main_toggle_btn(self, state):
+        if self.is_img2img:
+            if self.world.enabled_i2i == state: # just prevents a redundant config save if ui desyncs
+                return
+            self.world.enabled_i2i = state
+        else:
+            if self.world.enabled == state:
+                return
+            self.world.enabled = state
+
         self.world.save_config()
 
         # restore vanilla sdwui handler for model dropdown if extension is disabled or inject if otherwise
-        if not self.world.enabled:
+        if not self.world.enabled and not self.world.enabled_i2i:
             model_dropdown = opts.data_labels.get('sd_model_checkpoint')
             if self.original_model_dropdown_handler is not None:
                 model_dropdown.onchange = self.original_model_dropdown_handler
@@ -208,17 +217,14 @@ class UI:
     def create_ui(self):
         """creates the extension UI and returns relevant components"""
         components = []
+        elem_id = 'enabled'
+        if self.is_img2img:
+            elem_id += '_i2i'
 
         with gradio.Blocks(variant='compact'):  # Group() and Box() remove spacing
-            with gradio.Accordion(label='Distributed', open=False):
-                # https://github.com/AUTOMATIC1111/stable-diffusion-webui/issues/6109#issuecomment-1403315784
-                main_toggle = gradio.Checkbox(  # main on/off ext. toggle
-                    elem_id='enable',
-                    label='Enable',
-                    value=self.world.enabled if self.world.enabled is not None else True,
-                    interactive=True
-                )
-                main_toggle.input(self.main_toggle_btn)
+            with InputAccordion(label='Distributed', open=False, value=self.world.config().get(elem_id), elem_id=elem_id) as main_toggle:
+                main_toggle.input(self.main_toggle_btn, inputs=[main_toggle])
+                setattr(main_toggle.accordion, 'do_not_save_to_config', True) # InputAccordion is really a CheckBox
                 components.append(main_toggle)
 
                 with gradio.Tab('Status') as status_tab:
@@ -236,8 +242,8 @@ class UI:
                         info='top-most message is newest'
                     )
 
-                    refresh_status_btn = gradio.Button(value='Refresh 🔄', size='sm')
-                    refresh_status_btn.click(self.status_btn, inputs=[], outputs=[jobs, status, logs])
+                    refresh_status_btn = gradio.Button(value='Refresh 🔄', size='sm', elem_id='distributed-refresh-status', visible=False)
+                    refresh_status_btn.click(self.status_btn, inputs=[], outputs=[jobs, status, logs], show_progress=False)
 
                     status_tab.select(fn=self.status_btn, inputs=[], outputs=[jobs, status, logs])
                     components += [status, jobs, logs, refresh_status_btn]

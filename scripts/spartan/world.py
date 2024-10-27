@@ -21,6 +21,9 @@ from .worker import Worker, State
 from modules.call_queue import wrap_queued_call, queue_lock
 from modules import processing
 from modules import progress
+from modules.scripts import PostprocessBatchListArgs
+from torchvision.transforms import ToPILImage
+from modules.images import image_grid
 
 
 class NotBenchmarked(Exception):
@@ -46,6 +49,7 @@ class Job:
         self.complementary: bool = False
         self.step_override = None
         self.thread = None
+        self.gallery_map: List[int] = []
 
     def __str__(self):
         prefix = ''
@@ -91,6 +95,7 @@ class World:
         self.verify_remotes = verify_remotes
         self.thin_client_mode = False
         self.enabled = True
+        self.enabled_i2i = True
         self.is_dropdown_handler_injected = False
         self.complement_production = True
         self.step_scaling = False
@@ -103,7 +108,6 @@ class World:
     def __repr__(self):
         return f"{len(self._workers)} workers"
 
-
     def default_batch_size(self) -> int:
         """the amount of images/total images requested that a worker would compute if conditions were perfect and
         each worker generated at the same speed. assumes one batch only"""
@@ -113,7 +117,7 @@ class World:
     def size(self) -> int:
         """
         Returns:
-            int: The number of nodes currently registered in the world.
+            int: The number of nodes currently registered in the world and in a valid state
         """
         return len(self.get_workers())
 
@@ -273,7 +277,7 @@ class World:
                 gradio.Info("Distributed: benchmarking complete!")
                 self.save_config()
 
-    def get_current_output_size(self) -> int:
+    def num_requested(self) -> int:
         """
         returns how many images would be returned from all jobs
         """
@@ -284,6 +288,11 @@ class World:
             num_images += job.batch_size
 
         return num_images
+
+    def num_gallery(self) -> int:
+        """How many images should appear in the gallery. This includes local generations and a grid(if enabled)"""
+
+        return self.num_requested() * self.p.n_iter + shared.opts.return_grid
 
     def speed_summary(self) -> str:
         """
@@ -393,7 +402,6 @@ class World:
             self.initialized = True
             logger.debug("world initialized!")
 
-
     def get_workers(self):
         filtered: List[Worker] = []
         for worker in self._workers:
@@ -472,7 +480,7 @@ class World:
         #######################
 
         # when total number of requested images was not cleanly divisible by world size then we tack the remainder on
-        remainder_images = self.p.batch_size - self.get_current_output_size()
+        remainder_images = self.p.batch_size - self.num_requested()
         if remainder_images >= 1:
             logger.debug(f"The requested number of images({self.p.batch_size}) was not cleanly divisible by the number of realtime nodes({len(self.realtime_jobs())}) resulting in {remainder_images} that will be redistributed")
 
@@ -551,21 +559,37 @@ class World:
         else:
             logger.debug("complementary image production is disabled")
 
-        logger.info(self.distro_summary(payload))
+        logger.info(self.distro_summary())
 
         if self.thin_client_mode is True or self.master_job().batch_size == 0:
             # save original process_images_inner for later so we can restore once we're done
             logger.debug(f"bypassing local generation completely")
             def process_images_inner_bypass(p) -> processing.Processed:
+                p.seeds, p.subseeds, p.negative_prompts, p.prompts = [], [], [], []
+                pp = PostprocessBatchListArgs(images=[])
+                self.p.scripts.postprocess_batch_list(p, pp)
+
                 processed = processing.Processed(p, [], p.seed, info="")
-                processed.all_prompts = []
-                processed.all_seeds = []
-                processed.all_subseeds = []
-                processed.all_negative_prompts = []
-                processed.infotexts = []
-                processed.prompt = None
+                processed.all_prompts = p.prompts
+                processed.all_seeds = p.seeds
+                processed.all_subseeds = p.subseeds
+                processed.all_negative_prompts = p.negative_prompts
+                processed.images = pp.images
+                processed.infotexts = [''] * self.num_requested()
+
+                transform = ToPILImage()
+                for i, image in enumerate(processed.images):
+                    processed.images[i] = transform(image)
+
 
                 self.p.scripts.postprocess(p, processed)
+
+                # generate grid if enabled
+                if shared.opts.return_grid and len(processed.images) > 1:
+                    grid = image_grid(processed.images, len(processed.images))
+                    processed.images.insert(0, grid)
+                    processed.infotexts.insert(0, processed.infotexts[0])
+
                 return processed
             processing.process_images_inner = process_images_inner_bypass
 
@@ -576,18 +600,17 @@ class World:
                 del self.jobs[last]
             last -= 1
 
-    def distro_summary(self, payload):
-        # iterations = dict(payload)['n_iter']
-        iterations = self.p.n_iter
-        num_returning = self.get_current_output_size()
+    def distro_summary(self):
+        num_returning = self.num_requested()
         num_complementary = num_returning - self.p.batch_size
+
         distro_summary = "Job distribution:\n"
-        distro_summary += f"{self.p.batch_size} * {iterations} iteration(s)"
+        distro_summary += f"{self.p.batch_size} * {self.p.n_iter} iteration(s)"
         if num_complementary > 0:
             distro_summary += f" + {num_complementary} complementary"
-        distro_summary += f": {num_returning} images total\n"
+        distro_summary += f": {num_returning * self.p.n_iter} images total\n"
         for job in self.jobs:
-            distro_summary += f"'{job.worker.label}' - {job.batch_size * iterations} image(s) @ {job.worker.avg_ipm:.2f} ipm\n"
+            distro_summary += f"'{job.worker.label}' - {job.batch_size * self.p.n_iter} image(s) @ {job.worker.avg_ipm:.2f} ipm\n"
         return distro_summary
 
     def config(self) -> dict:
@@ -670,9 +693,10 @@ class World:
 
             self.add_worker(**fields)
 
-        sh.benchmark_payload = Benchmark_Payload(**config.benchmark_payload)
+        sh.benchmark_payload = Benchmark_Payload(**config.benchmark_payload.dict())
         self.job_timeout = config.job_timeout
         self.enabled = config.enabled
+        self.enabled_i2i = config.enabled_i2i
         self.complement_production = config.complement_production
         self.step_scaling = config.step_scaling
 
@@ -688,6 +712,7 @@ class World:
             benchmark_payload=sh.benchmark_payload,
             job_timeout=self.job_timeout,
             enabled=self.enabled,
+            enabled_i2i=self.enabled_i2i,
             complement_production=self.complement_production,
             step_scaling=self.step_scaling
         )
@@ -743,6 +768,9 @@ class World:
                     worker.set_state(State.IDLE, expect_cycle=True)
                 else:
                     msg = f"worker '{worker.label}' is unreachable"
+                    if worker.response.status_code is not None:
+                        msg += f" <{worker.response.status_code}>"
+
                     logger.info(msg)
                     gradio.Warning("Distributed: "+msg)
                     worker.set_state(State.UNAVAILABLE)
@@ -752,7 +780,6 @@ class World:
     def restart_all(self):
         for worker in self._workers:
             worker.restart()
-
 
     def inject_model_dropdown_handler(self):
         if self.config().get('enabled', False): # TODO avoid access from config()

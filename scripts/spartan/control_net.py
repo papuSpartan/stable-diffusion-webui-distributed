@@ -1,9 +1,12 @@
+# https://github.com/Mikubill/sd-webui-controlnet/wiki/API#examples-1
+
 import copy
 from PIL import Image
 from modules.api.api import encode_pil_to_base64
 from scripts.spartan.shared import logger
 import numpy as np
 import json
+import enum
 
 
 def np_to_b64(image: np.ndarray):
@@ -58,10 +61,14 @@ def pack_control_net(cn_units) -> dict:
                 unit['mask'] = mask_b64  # mikubill
                 unit['mask_image'] = mask_b64  # forge
 
+
+        # serialize all enums
+        for k in unit.keys():
+            if isinstance(unit[k], enum.Enum):
+                unit[k] = unit[k].value
+
         # avoid returning duplicate detection maps since master should return the same one
         unit['save_detected_map'] = False
-        # remove anything unserializable
-        del unit['input_mode']
 
     try:
         json.dumps(controlnet)

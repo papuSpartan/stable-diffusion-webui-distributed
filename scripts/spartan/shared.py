@@ -65,7 +65,7 @@ samples = 3  # number of times to benchmark worker after warmup benchmarks are c
 
 
 class BenchmarkPayload(BaseModel):
-    validate_assignment = True
+    # validate_assignment = True
     prompt: str = Field(default="A herd of cows grazing at the bottom of a sunny valley")
     negative_prompt: str = Field(default="")
     steps: int = Field(default=20)

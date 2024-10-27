@@ -29,17 +29,18 @@ class Worker_Model(BaseModel):
         default=False
     )
     state: Optional[Any] = Field(default=1, description="The last known state of this worker")
-    user: Optional[str] = Field(description="The username to be used when authenticating with this worker")
-    password: Optional[str] = Field(description="The password to be used when authenticating with this worker")
+    user: Optional[str] = Field(description="The username to be used when authenticating with this worker", default=None)
+    password: Optional[str] = Field(description="The password to be used when authenticating with this worker", default=None)
     pixel_cap: Optional[int] = Field(default=-1, description="Max amount of pixels to allow one worker to handle at the same time. -1 means there is no limit")
 
 class ConfigModel(BaseModel):
     workers: List[Dict[str, Worker_Model]]
-    benchmark_payload: Dict = Field(
+    benchmark_payload: Benchmark_Payload = Field(
         default=Benchmark_Payload,
         description='the payload used when benchmarking a node'
     )
     job_timeout: Optional[int] = Field(default=3)
     enabled: Optional[bool] = Field(description="Whether the extension as a whole should be active or disabled", default=True)
+    enabled_i2i: Optional[bool] = Field(description="Same as above but for image to image", default=True)
     complement_production: Optional[bool] = Field(description="Whether to generate complementary images to prevent under-utilizing hardware", default=True)
     step_scaling: Optional[bool] = Field(description="Whether to downscale requested steps in order to meet time constraints", default=False)
