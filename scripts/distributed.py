@@ -256,8 +256,13 @@ class DistributedScript(scripts.Script):
         if self.dynprompts is not None:
             logger.debug("running dynprompts early")
 
+            # p_temp = copy.copy(p)
+            # dynamic clobbers the actual p even if we pass a different object
+            for i in range(self.world.num_requested()):
+                p.all_prompts.append(p.prompt)
             dynprompts_args = p.script_args[self.dynprompts.args_from:self.dynprompts.args_to]
             self.dynprompts.process(p, *dynprompts_args)
+            logger.debug(p.all_prompts)
 
         # encapsulating the request object within a txt2imgreq object is deprecated and no longer works
         # see test/basic_features/txt2img_test.py for an example
@@ -326,6 +331,7 @@ class DistributedScript(scripts.Script):
                 prior_images += j.batch_size * p.n_iter
 
             payload_temp['batch_size'] = job.batch_size
+            payload_temp['prompt'] = payload_temp['all_prompts'][prior_images]
             if job.step_override is not None:
                 payload_temp['steps'] = job.step_override
             payload_temp['subseed'] += prior_images
