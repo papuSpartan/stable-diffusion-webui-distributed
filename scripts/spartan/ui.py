@@ -206,6 +206,10 @@ class UI:
         else:
             self.world.inject_model_dropdown_handler()
 
+    def comparison_mode(self, state):
+        logger.debug(f"comparison mode: {state}")
+        self.world.comparison_mode = state
+
     def reset_error_correction_btn(self):
         for worker in self.world._workers:
             logger.debug(f"Worker '{worker.label}' mpe before wiping:\n{worker.eta_percent_error}")
@@ -386,9 +390,16 @@ class UI:
                         value=self.world.step_scaling
                     )
 
+                    comparison_mode = gradio.Checkbox(
+                        label='Comparison mode',
+                        info='holds seed constant, disallows complementary results,  and disallows step scaling',
+                        value=self.world.comparison_mode
+                    )
+                    comparison_mode.input(self.comparison_mode, inputs=[comparison_mode])
+
                     save_btn = gradio.Button(value='Update')
                     save_btn.click(fn=self.save_btn, inputs=[thin_client_cbx, job_timeout, complement_production, step_scaling])
-                    components += [thin_client_cbx, job_timeout, complement_production, step_scaling, save_btn]
+                    components += [thin_client_cbx, job_timeout, complement_production, step_scaling, comparison_mode, save_btn]
 
                 with gradio.Tab('Help'):
                     gradio.Markdown(

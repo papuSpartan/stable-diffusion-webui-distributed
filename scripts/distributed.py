@@ -40,6 +40,7 @@ class DistributedScript(scripts.Script):
     runs_since_init = 0
     name = "distributed"
     is_dropdown_handler_injected = False
+    dynprompts = None
 
     if verify_remotes is False:
         logger.warning(f"You have chosen to forego the verification of worker TLS certificates")
@@ -211,6 +212,24 @@ class DistributedScript(scripts.Script):
                     logger.debug(f"adetailer is skipping img2img, returning control to wui")
                     return
 
+            if "Dynamic Prompts" in title:
+                logger.debug("finding callback")
+
+                script_process_cbs = p.scripts.callback_map['script_process'][1]
+
+                if self.dynprompts is None:
+                    for i, callback in enumerate(script_process_cbs):
+                        if callback.callback.name == title.lower():
+                            logger.debug(f"found callback")
+
+                            self.dynprompts = script
+                            # prevent double exec
+                            script_process_cbs.remove(callback)
+                else:
+                    logger.debug(f"already hooked dynamic prompts")
+
+
+
             # check for supported scripts
             if title == "ControlNet":
                 # grab all controlnet units
@@ -234,6 +253,12 @@ class DistributedScript(scripts.Script):
             packed_script_args.append(args_script_pack)
             # https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111/issues/12#issuecomment-1480382514
 
+        if self.dynprompts is not None:
+            logger.debug("running dynprompts early")
+
+            dynprompts_args = p.script_args[self.dynprompts.args_from:self.dynprompts.args_to]
+            self.dynprompts.process(p, *dynprompts_args)
+
         # encapsulating the request object within a txt2imgreq object is deprecated and no longer works
         # see test/basic_features/txt2img_test.py for an example
         payload = copy.copy(p.__dict__)
@@ -252,6 +277,8 @@ class DistributedScript(scripts.Script):
         fix_seed(p)
         payload['seed'] = p.seed
         payload['subseed'] = p.subseed
+
+
 
         # TODO api for some reason returns 200 even if something failed to be set.
         #  for now we may have to make redundant GET requests to check if actually successful...
@@ -302,7 +329,8 @@ class DistributedScript(scripts.Script):
             if job.step_override is not None:
                 payload_temp['steps'] = job.step_override
             payload_temp['subseed'] += prior_images
-            payload_temp['seed'] += prior_images if payload_temp['subseed_strength'] == 0 else 0
+            if not self.world.comparison_mode:
+                payload_temp['seed'] += prior_images if payload_temp['subseed_strength'] == 0 else 0
             logger.debug(
                 f"'{job.worker.label}' job's given starting seed is "
                 f"{payload_temp['seed']} with {prior_images} coming before it"

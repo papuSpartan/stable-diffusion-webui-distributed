@@ -99,6 +99,7 @@ class World:
         self.is_dropdown_handler_injected = False
         self.complement_production = True
         self.step_scaling = False
+        self.comparison_mode = False
 
     def __getitem__(self, label: str) -> Worker:
         for worker in self._workers:
@@ -426,22 +427,23 @@ class World:
         # the maximum amount of images that a "slow" worker can produce in the slack space where other nodes are working
         # max_compensation = 4 currently unused
         images_checked = 0
-        for job in self.jobs:
+        if not self.comparison_mode: # if comparing then we assume we will have to just wait on every enabled node
+            for job in self.jobs:
 
-            lag = self.job_stall(job.worker, payload=payload)
+                lag = self.job_stall(job.worker, payload=payload)
 
-            if lag < self.job_timeout or lag == 0:
-                job.batch_size = payload['batch_size']
-                images_checked += payload['batch_size']
-                continue
+                if lag < self.job_timeout or lag == 0:
+                    job.batch_size = payload['batch_size']
+                    images_checked += payload['batch_size']
+                    continue
 
-            logger.debug(f"worker '{job.worker.label}' would stall the image gallery by ~{lag:.2f}s\n")
-            job.complementary = True
-            if deferred_images + images_checked + payload['batch_size'] > self.p.batch_size:
-                logger.debug(f"would go over actual requested size")
-            else:
-                deferred_images += payload['batch_size']
-            job.batch_size = 0
+                logger.debug(f"worker '{job.worker.label}' would stall the image gallery by ~{lag:.2f}s\n")
+                job.complementary = True
+                if deferred_images + images_checked + payload['batch_size'] > self.p.batch_size:
+                    logger.debug(f"would go over actual requested size")
+                else:
+                    deferred_images += payload['batch_size']
+                job.batch_size = 0
 
         ####################################################
         # redistributing deferred images to realtime jobs  #
@@ -768,7 +770,7 @@ class World:
                     worker.set_state(State.IDLE, expect_cycle=True)
                 else:
                     msg = f"worker '{worker.label}' is unreachable"
-                    if worker.response.status_code is not None:
+                    if worker.response is not None:
                         msg += f" <{worker.response.status_code}>"
 
                     logger.info(msg)
