@@ -22,10 +22,10 @@ from modules.images import save_image, image_grid
 from modules.processing import fix_seed
 from modules.shared import opts, cmd_opts
 from modules.shared import state as webui_state
-from scripts.spartan.control_net import pack_control_net
 from scripts.spartan.shared import logger
 from scripts.spartan.ui import UI
 from scripts.spartan.world import World, State, Job
+from scripts.spartan.adapters import adapters
 
 old_sigint_handler = signal.getsignal(signal.SIGINT)
 old_sigterm_handler = signal.getsignal(signal.SIGTERM)
@@ -40,7 +40,6 @@ class DistributedScript(scripts.Script):
     runs_since_init = 0
     name = "distributed"
     is_dropdown_handler_injected = False
-    dynprompts = None
 
     if verify_remotes is False:
         logger.warning(f"You have chosen to forego the verification of worker TLS certificates")
@@ -183,7 +182,9 @@ class DistributedScript(scripts.Script):
 
     # p's type is
     # "modules.processing.StableDiffusionProcessing*"
-    def before_process(self, p, *args):
+    def process(self, p, *args):
+        active_adapters = []
+
         is_img2img = getattr(p, 'init_images', False)
         if is_img2img and self.world.enabled_i2i is False:
             logger.debug("extension is disabled for i2i")
@@ -204,68 +205,24 @@ class DistributedScript(scripts.Script):
                 continue
             title = script.title()
 
-            if title == "ADetailer":
-                adetailer_args = p.script_args[script.args_from:script.args_to]
+            found_adapter = False
+            for adapter in adapters:
+                if adapter.title.lower() in title.lower():
+                    active_adapters.append(adapter)
+                    adapter.early(p, self.world, script, packed_script_args)
+                    found_adapter = True
+                    break
 
-                # InputAccordion main toggle, skip img2img toggle
-                if adetailer_args[0] and adetailer_args[1]:
-                    logger.debug(f"adetailer is skipping img2img, returning control to wui")
-                    return
+            if not found_adapter: # shoehorn scripts which we don't explicitly support
+                # https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111/issues/12#issuecomment-1480382514
+                args_script_pack = {title: {"args": []}}
+                for arg in p.script_args[script.args_from:script.args_to]:
+                    args_script_pack[title]["args"].append(arg)
+                packed_script_args.append(args_script_pack)
+        logger.debug(f"activated {len(active_adapters)} adapters: {active_adapters}")
 
-            if "Dynamic Prompts" in title:
-                logger.debug("finding callback")
-
-                script_process_cbs = p.scripts.callback_map['script_process'][1]
-
-                if self.dynprompts is None:
-                    for i, callback in enumerate(script_process_cbs):
-                        if callback.callback.name == title.lower():
-                            logger.debug(f"found callback")
-
-                            self.dynprompts = script
-                            # prevent double exec
-                            script_process_cbs.remove(callback)
-                else:
-                    logger.debug(f"already hooked dynamic prompts")
-
-
-
-            # check for supported scripts
-            if title == "ControlNet":
-                # grab all controlnet units
-                cn_units = []
-                cn_args = p.script_args[script.args_from:script.args_to]
-
-                for cn_arg in cn_args:
-                    if "ControlNetUnit" in type(cn_arg).__name__:
-                        cn_units.append(cn_arg)
-                logger.debug(f"Detected {len(cn_units)} controlnet unit(s)")
-
-                # get api formatted controlnet
-                packed_script_args.append(pack_control_net(cn_units))
-
-                continue
-
-            # other scripts to pack
-            args_script_pack = {title: {"args": []}}
-            for arg in p.script_args[script.args_from:script.args_to]:
-                args_script_pack[title]["args"].append(arg)
-            packed_script_args.append(args_script_pack)
-            # https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111/issues/12#issuecomment-1480382514
-
-        if self.dynprompts is not None:
-            logger.debug("running dynprompts early")
-
-            # p_temp = copy.copy(p)
-            # dynamic clobbers the actual p even if we pass a different object
-            for i in range(self.world.num_requested()):
-                p.all_prompts.append(p.prompt)
-            dynprompts_args = p.script_args[self.dynprompts.args_from:self.dynprompts.args_to]
-            self.dynprompts.process(p, *dynprompts_args)
-            logger.debug(p.all_prompts)
-
-        # encapsulating the request object within a txt2imgreq object is deprecated and no longer works
-        # see test/basic_features/txt2img_test.py for an example
+        # generate seed early for master so that we can calculate the successive seeds for each slave
+        fix_seed(p)
         payload = copy.copy(p.__dict__)
         payload['batch_size'] = self.world.default_batch_size()
         payload['scripts'] = None
@@ -278,17 +235,6 @@ class DistributedScript(scripts.Script):
         for packed in packed_script_args:
             payload['alwayson_scripts'].update(packed)
 
-        # generate seed early for master so that we can calculate the successive seeds for each slave
-        fix_seed(p)
-        payload['seed'] = p.seed
-        payload['subseed'] = p.subseed
-
-
-
-        # TODO api for some reason returns 200 even if something failed to be set.
-        #  for now we may have to make redundant GET requests to check if actually successful...
-        #  https://github.com/AUTOMATIC1111/stable-diffusion-webui/issues/8146
-
         name = re.sub(r'\s?\[[^]]*]$', '', opts.data["sd_model_checkpoint"])
         vae = opts.data.get('sd_vae')
         option_payload = {
@@ -296,11 +242,13 @@ class DistributedScript(scripts.Script):
             "sd_vae": vae
         }
 
+        self.world.optimize_jobs(payload)
+        for adapter in active_adapters:
+            adapter.less_early(p, self.world, payload, option_payload)
+
         # start generating images assigned to remote machines
         sync = False  # should only really need to sync once per job
-        self.world.optimize_jobs(payload)  # optimize work assignment before dispatching
         started_jobs = []
-
         # check if anything even needs to be done
         if len(self.world.jobs) == 1 and self.world.jobs[0].worker.master:
 
