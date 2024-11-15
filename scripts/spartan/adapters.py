@@ -1,3 +1,4 @@
+from PIL.Image import Image
 from typing_extensions import override, Tuple
 from scripts.spartan.shared import logger
 from scripts.spartan.control_net import pack_control_net
@@ -6,10 +7,14 @@ class Adapter(object):
 	def __init__(self):
 		self.script = None
 
-	def early(self, p, world, script, *args):
-		self.script = script
+	def early(self, p, world, script, *args) -> bool:
+		"""return True to cede control back to webui"""
 
-	def less_early(self, p, world, payload, *args):
+		self.script = script
+		return False
+
+	def late(self, p, world, payload, *args):
+		# payload['alwayson_scripts'] guaranteed to exist, but may not be populated
 		pass
 
 	def script_args(self, p) -> Tuple:
@@ -22,46 +27,49 @@ class DynamicPromptsAdapter(Adapter):
 
 	def early(self, p, world, script, *args):
 		super().early(p, world, script)
-		
-		self.script = script
-		logger.debug("finding callback")
 
-		script_process_cbs = p.scripts.callback_map['script_process'][1]
+		# dynamic will run twice, but because of load order our call overwrites the original
+		# logger.debug("finding callback")
+		# script_process_cbs = p.scripts.callback_map['script_process'][1]
 
-		for i, callback in enumerate(script_process_cbs):
-			if callback.callback.name == self.title.lower():
-				logger.debug(f"found callback")
+		# for i, callback in enumerate(script_process_cbs):
+		# 	if callback.callback.name == self.title.lower():
+		# 		logger.debug(f"found callback")
 
-				# prevent double exec
-				script_process_cbs.remove(callback)
-		else:
-			logger.debug(f"already hooked dynamic prompts")
+		# 		# prevent double exec
+		# 		script_process_cbs.remove(callback)
+		# else:
+		# 	logger.debug(f"already hooked dynamic prompts")
 
 	# right before payload is cloned into a seperate instance for each job
-	def less_early(self, p, world, payload, *args):
-		logger.debug("running dynprompts early")
+	def late(self, p, world, payload, *args):
 
 		# dynamic clobbers the actual p even if we pass a different object
-		p.all_prompts.clear()
-		for i in range(world.num_requested()):
-			p.all_prompts.append(p.prompt)
-		# dynprompts_args = p.script_args[self.script.args_from:self.script.args_to]
-		# dynamic prompts overrides p.all_prompts if it doesn't match the batch size. we should be able to set batch-
-		# size earlier than in the past when we were running as a selectable script since we are overriding local generation
-		# we can probably just set this earlier since
+		if len(p.prompt) > 1:
+			p.all_prompts.clear()
+			for i in range(world.num_requested()):
+				p.all_prompts.append(p.prompt)
+		elif len(p.negative_prompt) > 1:
+			p.all_negative_prompts.clear()
+			for i in range(world.num_requested()):
+				p.all_negative_prompts.append(p.negative_prompt)
+		else:
+			return
+
+		# dynamic prompts overrides p.all_prompts if it doesn't match the batch size
+		temp = p.batch_size
 		p.batch_size = world.num_requested()
 		self.script.process(p, *self.script_args(p))
-		# TODO this shouldn't need to be done twice (only doing now for dyn prompts)
+		p.batch_size = temp
 		payload['all_prompts'] = p.all_prompts
+		payload['all_negative_prompts'] = p.all_negative_prompts
 
 class ControlNetAdapter(Adapter):
 	def __init__(self, *args):
 		super().__init__()
 		self.title = "ControlNet"
 
-	def early(self, p, world, script, packed_script_args, *args):
-		super().early(p, world, script)
-
+	def late(self, p, world, payload, *args):
 		# grab all controlnet units
 		cn_units = []
 		for cn_arg in self.script_args(p):
@@ -70,7 +78,7 @@ class ControlNetAdapter(Adapter):
 		logger.debug(f"Detected {len(cn_units)} controlnet unit(s)")
 
 		# get api formatted controlnet
-		packed_script_args.append(pack_control_net(cn_units))
+		payload['alwayson_scripts'].update(pack_control_net(cn_units))
 
 class ADetailerAdapter(Adapter):
 	def __init__(self, *args):
@@ -83,7 +91,40 @@ class ADetailerAdapter(Adapter):
 
 		# InputAccordion main toggle, skip img2img toggle
 		if adetailer_args[0] and adetailer_args[1]:
-			logger.debug(f"adetailer is skipping img2img, returning control to wui")
-			return
+			return True
+
+	def late(self, p, world, payload, *args):
+		payload['_ad_orig'] = None # unserializable
+
+
+class GenericAdapter(Adapter):
+	def __init__(self, *args):
+		super().__init__()
+		self.packed_script_args = []  # list of api formatted per-script argument objects
+		# { "script_name": { "args": ["value1", "value2", ...] }
+
+	def early(self, p, world, script, *args):
+		title = script.title()
+		# https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111/issues/12#issuecomment-1480382514
+		args_script_pack = {title: {"args": []}}
+		for arg in p.script_args[script.args_from:script.args_to]:
+			args_script_pack[title]["args"].append(arg)
+		self.packed_script_args.append(args_script_pack)
+
+	def late(self, p, world, payload, *args):
+		for packed in self.packed_script_args:
+			payload['alwayson_scripts'].update(packed)
+
+
+		if payload.get('init_images_original_md') is not None: # multidiffusion
+			payload['init_images_original_md'] = None
+
+		# for key in payload:
+		# 	contains_dict = any(isinstance(payload[key], Image) for item in payload)
+		# 	if isinstance(payload[key], Image):
+		# 		logger.warning(f"will not serialize PIL image in key '{key}'")
+		# 		del payload[key]
+
+
 
 adapters = [ControlNetAdapter(), ADetailerAdapter(), DynamicPromptsAdapter()]

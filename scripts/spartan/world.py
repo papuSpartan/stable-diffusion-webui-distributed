@@ -24,6 +24,7 @@ from modules import progress
 from modules.scripts import PostprocessBatchListArgs
 from torchvision.transforms import ToPILImage
 from modules.images import image_grid
+import traceback
 
 
 class NotBenchmarked(Exception):
@@ -390,7 +391,6 @@ class World:
                     worker.benchmark()
 
                 self.jobs.append(Job(worker=worker, batch_size=batch_size))
-                logger.debug(f"added job for worker {worker.label}")
 
     def update(self, p):
         """preps world for another run"""
@@ -787,7 +787,6 @@ class World:
         if self.config().get('enabled', False): # TODO avoid access from config()
             return
         if self.is_dropdown_handler_injected:
-            logger.debug("handler is already injected")
             return
 
         # get original handler for model dropdown

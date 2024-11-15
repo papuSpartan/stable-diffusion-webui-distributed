@@ -18,14 +18,13 @@ import urllib3
 from PIL import Image
 from modules import processing
 from modules import scripts
-from modules.images import save_image, image_grid
 from modules.processing import fix_seed
 from modules.shared import opts, cmd_opts
 from modules.shared import state as webui_state
 from scripts.spartan.shared import logger
 from scripts.spartan.ui import UI
 from scripts.spartan.world import World, State, Job
-from scripts.spartan.adapters import adapters
+from scripts.spartan.adapters import adapters, GenericAdapter
 
 old_sigint_handler = signal.getsignal(signal.SIGINT)
 old_sigterm_handler = signal.getsignal(signal.SIGTERM)
@@ -71,6 +70,15 @@ class DistributedScript(scripts.Script):
         self.world.inject_model_dropdown_handler()
         # return some components that should be exposed to the api
         return components
+
+    def enabled(self, p):
+        is_img2img = getattr(p, 'init_images', False)
+        if is_img2img and self.world.enabled_i2i is False:
+            return False
+        elif not is_img2img and self.world.enabled is False:
+            return False
+
+        return True
 
     def api_to_internal(self, job) -> ([], [], [], [], []):
         # takes worker response received from api and returns parsed objects in internal sdwui format. E.g. all_seeds
@@ -182,8 +190,14 @@ class DistributedScript(scripts.Script):
 
     # p's type is
     # "modules.processing.StableDiffusionProcessing*"
-    def process(self, p, *args):
+    def before_process(self, p, *args):
+        # decide how to distribute work, apply adaptations for extensions, dispatch requests
+        if not self.enabled(p):
+            return
+
         active_adapters = []
+        if p.all_prompts is None:
+            p.all_prompts = []
 
         is_img2img = getattr(p, 'init_images', False)
         if is_img2img and self.world.enabled_i2i is False:
@@ -197,43 +211,38 @@ class DistributedScript(scripts.Script):
         # save original process_images_inner function for later if we monkeypatch it
         self.original_process_images_inner = processing.process_images_inner
 
-        # strip scripts that aren't yet supported and warn user
-        packed_script_args: List[dict] = []  # list of api formatted per-script argument objects
-        # { "script_name": { "args": ["value1", "value2", ...] }
+        generic_adapter = GenericAdapter()
         for script in p.scripts.scripts:
             if script.alwayson is not True:
                 continue
-            title = script.title()
 
+            title = script.title()
             found_adapter = False
             for adapter in adapters:
                 if adapter.title.lower() in title.lower():
                     active_adapters.append(adapter)
-                    adapter.early(p, self.world, script, packed_script_args)
+                    cede = adapter.early(p, self.world, script)
+                    if cede:
+                        logger.debug(f"adapter for '{adapter.title}' cedes control back to wui")
+                        return
                     found_adapter = True
                     break
 
             if not found_adapter: # shoehorn scripts which we don't explicitly support
-                # https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111/issues/12#issuecomment-1480382514
-                args_script_pack = {title: {"args": []}}
-                for arg in p.script_args[script.args_from:script.args_to]:
-                    args_script_pack[title]["args"].append(arg)
-                packed_script_args.append(args_script_pack)
-        logger.debug(f"activated {len(active_adapters)} adapters: {active_adapters}")
+                generic_adapter.early(p, self.world, script)
+        logger.debug(f"activated {len(active_adapters)} adapters: {[a.title for a in active_adapters]}")
 
         # generate seed early for master so that we can calculate the successive seeds for each slave
         fix_seed(p)
         payload = copy.copy(p.__dict__)
+        payload['alwayson_scripts'] = {}
         payload['batch_size'] = self.world.default_batch_size()
         payload['scripts'] = None
+        payload['scripts_value'] = None
         try:
             del payload['script_args']
         except KeyError:
             del payload['script_args_value']
-
-        payload['alwayson_scripts'] = {}
-        for packed in packed_script_args:
-            payload['alwayson_scripts'].update(packed)
 
         name = re.sub(r'\s?\[[^]]*]$', '', opts.data["sd_model_checkpoint"])
         vae = opts.data.get('sd_vae')
@@ -244,7 +253,8 @@ class DistributedScript(scripts.Script):
 
         self.world.optimize_jobs(payload)
         for adapter in active_adapters:
-            adapter.less_early(p, self.world, payload, option_payload)
+            adapter.late(p, self.world, payload, option_payload)
+        generic_adapter.late(p, self.world, payload, option_payload)
 
         # start generating images assigned to remote machines
         sync = False  # should only really need to sync once per job
@@ -265,10 +275,7 @@ class DistributedScript(scripts.Script):
             if job.worker.state in (State.UNAVAILABLE, State.DISABLED):
                 continue
 
-            payload_temp = copy.copy(payload)
-            del payload_temp['scripts_value']
-            payload_temp = copy.deepcopy(payload_temp)
-
+            payload_worker = copy.deepcopy(payload)
             if job.worker.master:
                 started_jobs.append(job)
             if job.batch_size < 1 or job.worker.master:
@@ -278,16 +285,19 @@ class DistributedScript(scripts.Script):
             for j in started_jobs:
                 prior_images += j.batch_size * p.n_iter
 
-            payload_temp['batch_size'] = job.batch_size
-            payload_temp['prompt'] = payload_temp['all_prompts'][prior_images]
+            payload_worker['batch_size'] = job.batch_size
+            if len(payload_worker['all_prompts']) == self.world.num_requested():
+                payload_worker['prompt'] = payload_worker['all_prompts'][prior_images]
+            if len(payload_worker['all_negative_prompts']) == self.world.num_requested():
+                payload_worker['negative_prompt'] = payload_worker['all_negative_prompts'][prior_images]
             if job.step_override is not None:
-                payload_temp['steps'] = job.step_override
-            payload_temp['subseed'] += prior_images
+                payload_worker['steps'] = job.step_override
+            payload_worker['subseed'] += prior_images
             if not self.world.comparison_mode:
-                payload_temp['seed'] += prior_images if payload_temp['subseed_strength'] == 0 else 0
+                payload_worker['seed'] += prior_images if payload_worker['subseed_strength'] == 0 else 0
             logger.debug(
                 f"'{job.worker.label}' job's given starting seed is "
-                f"{payload_temp['seed']} with {prior_images} coming before it"
+                f"{payload_worker['seed']} with {prior_images} coming before it"
             )
 
             if job.worker.loaded_model != name or job.worker.loaded_vae != vae:
@@ -295,7 +305,7 @@ class DistributedScript(scripts.Script):
                 job.worker.loaded_model = name
                 job.worker.loaded_vae = vae
 
-            job.thread = Thread(target=job.worker.request, args=(payload_temp, option_payload, sync,),
+            job.thread = Thread(target=job.worker.request, args=(payload_worker, option_payload, sync,),
                        name=f"{job.worker.label}_request")
             job.thread.start()
             started_jobs.append(job)
@@ -309,13 +319,11 @@ class DistributedScript(scripts.Script):
         return
 
     def postprocess_batch_list(self, p, pp, *args, **kwargs):
+        # inject images
         if not self.world.thin_client_mode and p.n_iter != kwargs['batch_number'] + 1: # skip if not the final batch
             return
 
-        is_img2img = getattr(p, 'init_images', False)
-        if is_img2img and self.world.enabled_i2i is False:
-            return
-        elif not is_img2img and self.world.enabled is False:
+        if not self.enabled(p):
             return
 
         if self.master_start is not None:
@@ -323,7 +331,13 @@ class DistributedScript(scripts.Script):
 
 
     def postprocess(self, p, processed, *args):
+        # overwrite with proper infotext from remote results and cleanup
+        if not self.enabled(p):
+            return
+
         for job in self.world.jobs:
+            if job.worker.master:
+                continue
             if job.worker.response is not None:
                 for i, v in enumerate(job.gallery_map):
                     infotext = json.loads(job.worker.response['info'])['infotexts'][i]

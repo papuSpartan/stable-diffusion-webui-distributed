@@ -412,10 +412,11 @@ class Worker:
                 # see if there is anything else wrong with serializing to payload
                 try:
                     json.dumps(payload)
-                except Exception as e:
+                except Exception:
+                    if payload.get('init_images', None):
+                        payload['init_images'] = 'TRUNCATED'
                     logger.error(f"Failed to serialize payload: \n{payload}")
                     # gradio.Info("Distributed: failed to serialize payload")
-                    raise e
 
                 # the main api requests sent to either the txt2img or img2img route
                 response_queue = queue.Queue()
