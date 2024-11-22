@@ -41,11 +41,11 @@ class WorkerException(Exception):
             if isinstance(exception, WorkerException):
                 raise exception
             elif isinstance(exception, requests.RequestException):
+                # ConnectionError is just a subclass of RequestException
                 worker.set_state(State.UNAVAILABLE)
             else:
                 worker.set_state(State.IDLE)
 
-            # logger.exception(exception)
             raise exception
 
 class State(Enum):
@@ -425,7 +425,7 @@ class Worker:
 
             self.prepare_payload(payload)
 
-            def interruptible_request(response_queue):
+            def interruptible_request(queue):
                 # TODO shouldn't be this way
                 sampler_index = payload.get('sampler_index', None)
                 sampler_name = payload.get('sampler_name', None)
@@ -434,14 +434,14 @@ class Worker:
                         payload['sampler_index'] = sampler_name
 
                 try:
-                    response_queue.put(
+                    queue.put(
                         self.session.post(
                             self.full_url("txt2img") if payload.get('init_images', None) is None else self.full_url("img2img"),
                             json=payload
                         )
                     )
                 except Exception as e:
-                    response_queue.put(e)  # forwarding thrown exceptions to parent thread
+                    queue.put(e)  # forwarding thrown exceptions to parent thread
 
             request_thread = Thread(target=interruptible_request, args=(response_queue,))
             interrupting = False
@@ -571,32 +571,28 @@ class Worker:
         return avg_ipm_result
 
     def refresh_checkpoints(self):
-        # gradio.Info("refreshing checkpoints")
         try:
             model_response = self.session.post(self.full_url('refresh-checkpoints'))
             lora_response = self.session.post(self.full_url('refresh-loras'))
 
+            msg_start = 'Failed to refresh '
+            msg_end = f" for worker '{self.label}'\nCode <{model_response.status_code}>"
             if model_response.status_code != 200:
-                msg = f"Failed to refresh models for worker '{self.label}'\nCode <{model_response.status_code}>"
-                logger.error(msg)
-                # gradio.Warning("Distributed: "+msg)
+                logger.error(msg_start + 'models' + msg_end)
 
             if lora_response.status_code != 200:
-                msg = f"Failed to refresh LORA's for worker '{self.label}'\nCode <{lora_response.status_code}>"
-                logger.error(msg)
-                # gradio.Warning("Distributed: "+msg)
-        except requests.exceptions.ConnectionError:
-            self.set_state(State.UNAVAILABLE)
+                logger.error(msg_start + "LORA's" + msg_end)
+        except Exception as e:
+            raise WorkerException('', worker=self, exception=e)
 
     def interrupt(self):
         try:
             response = self.session.post(self.full_url('interrupt'))
-
             if response.status_code == 200:
                 self.set_state(State.INTERRUPTED)
                 logger.debug(f"successfully interrupted worker {self.label}")
-        except requests.exceptions.ConnectionError:
-            self.set_state(State.UNAVAILABLE)
+        except Exception as e:
+            raise WorkerException('did not respond to interrupt', worker=self, exception=e)
 
     def reachable(self) -> bool:
         """returns false if worker is unreachable"""
