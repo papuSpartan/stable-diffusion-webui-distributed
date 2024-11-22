@@ -8,12 +8,13 @@ class Adapter(object):
 		self.script = None
 
 	def early(self, p, world, script, *args) -> bool:
-		"""return True to cede control back to webui"""
+		"""make changes before any worker request objects are created. return True to cede control back to webui"""
 
 		self.script = script
 		return False
 
 	def late(self, p, world, payload, *args):
+		"""make changes after the worker request object has been created and workloads have been manipulated"""
 		# payload['alwayson_scripts'] guaranteed to exist, but may not be populated
 		pass
 

@@ -32,8 +32,8 @@ def pack_control_net(cn_units) -> dict:
     for i in range(0, len(cn_units)):
         if cn_units[i].enabled:
             cn_args.append(copy.deepcopy(cn_units[i].__dict__))
-        else:
-            logger.debug(f"controlnet unit {i} is not enabled (ignoring)")
+        # else:
+        #     logger.debug(f"controlnet unit {i} is not enabled (ignoring)")
 
     for i in range(0, len(cn_args)):
         unit = cn_args[i]

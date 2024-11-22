@@ -153,7 +153,7 @@ class DistributedScript(scripts.Script):
 
         received_images = False
         for job in self.world.jobs:
-            if job.worker.response is None or job.batch_size < 1 or job.worker.master:
+            if not isinstance(job.worker.response, dict) or job.batch_size < 1 or job.worker.master:
                 continue
 
             try:
@@ -198,6 +198,8 @@ class DistributedScript(scripts.Script):
         active_adapters = []
         if p.all_prompts is None:
             p.all_prompts = []
+        if p.all_negative_prompts is None:
+            p.all_negative_prompts = []
 
         is_img2img = getattr(p, 'init_images', False)
         if is_img2img and self.world.enabled_i2i is False:
