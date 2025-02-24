@@ -301,7 +301,7 @@ class Worker:
         return eta
 
     def matching_scripts(self, payload: dict, mode) -> dict:
-        alwayson_scripts = payload.get('alwayson_scripts', None)  # key may not always exist, benchmarking being one example
+        alwayson_scripts = payload.get('alwayson_scripts', {})  # key may not always exist, benchmarking being one example
         if alwayson_scripts is not None:
             if len(self.supported_scripts) <= 0:
                 payload['alwayson_scripts'] = {}
@@ -473,7 +473,7 @@ class Worker:
                     return
 
                 self.response = None
-                raise WorkerException(f"bad response: Code <{response.status_code}> ", worker=self)
+                raise WorkerException(f"\nbad response: Code <{response.status_code}>\ndetail: {json.loads(response.text)['detail']} ", worker=self)
 
             # update list of ETA accuracy if state is valid
             if self.benchmarked and not self.state == State.INTERRUPTED:
