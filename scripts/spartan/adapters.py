@@ -1,7 +1,8 @@
 from PIL.Image import Image
-from typing_extensions import override, Tuple
+from typing_extensions import override, Tuple, List
 from scripts.spartan.shared import logger
 from scripts.spartan.control_net import pack_control_net
+from modules.scripts import script_callbacks
 
 class Adapter(object):
 	def __init__(self):
@@ -21,28 +22,36 @@ class Adapter(object):
 	def script_args(self, p) -> Tuple:
 		return p.script_args[self.script.args_from:self.script.args_to]
 
+	def cleanup(self):
+		pass
+
+class GenericAdapter(Adapter):
+	def __init__(self, *args):
+		super().__init__()
+		self.packed_script_args = []  # list of api formatted per-script argument objects
+		# { "script_name": { "args": ["value1", "value2", ...] }
+
+	def early(self, p, world, script, *args):
+		title = script.title()
+		# https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111/issues/12#issuecomment-1480382514
+		args_script_pack = {title: {"args": []}}
+		for arg in p.script_args[script.args_from:script.args_to]:
+			args_script_pack[title]["args"].append(arg)
+		self.packed_script_args.append(args_script_pack)
+
+	def late(self, p, world, payload, *args):
+		for packed in self.packed_script_args:
+			payload['alwayson_scripts'].update(packed)
+
 class DynamicPromptsAdapter(Adapter):
 	def __init__(self):
 		super().__init__()
 		self.title = "Dynamic Prompts"
 
 	def early(self, p, world, script, *args):
+		# dynamic will run twice, but because of load order our call overwrites the original
 		super().early(p, world, script)
 
-		# dynamic will run twice, but because of load order our call overwrites the original
-		# logger.debug("finding callback")
-		# script_process_cbs = p.scripts.callback_map['script_process'][1]
-
-		# for i, callback in enumerate(script_process_cbs):
-		# 	if callback.callback.name == self.title.lower():
-		# 		logger.debug(f"found callback")
-
-		# 		# prevent double exec
-		# 		script_process_cbs.remove(callback)
-		# else:
-		# 	logger.debug(f"already hooked dynamic prompts")
-
-	# right before payload is cloned into a seperate instance for each job
 	def late(self, p, world, payload, *args):
 
 		# dynamic clobbers the actual p even if we pass a different object
@@ -97,35 +106,13 @@ class ADetailerAdapter(Adapter):
 	def late(self, p, world, payload, *args):
 		payload['_ad_orig'] = None # unserializable
 
-
-class GenericAdapter(Adapter):
+class MultiDiffusionAdapter(Adapter):
 	def __init__(self, *args):
 		super().__init__()
-		self.packed_script_args = []  # list of api formatted per-script argument objects
-		# { "script_name": { "args": ["value1", "value2", ...] }
-
-	def early(self, p, world, script, *args):
-		title = script.title()
-		# https://github.com/pkuliyi2015/multidiffusion-upscaler-for-automatic1111/issues/12#issuecomment-1480382514
-		args_script_pack = {title: {"args": []}}
-		for arg in p.script_args[script.args_from:script.args_to]:
-			args_script_pack[title]["args"].append(arg)
-		self.packed_script_args.append(args_script_pack)
+		self.title = "Tiled Diffusion"
 
 	def late(self, p, world, payload, *args):
-		for packed in self.packed_script_args:
-			payload['alwayson_scripts'].update(packed)
-
-
 		if payload.get('init_images_original_md') is not None: # multidiffusion
 			payload['init_images_original_md'] = None
 
-		# for key in payload:
-		# 	contains_dict = any(isinstance(payload[key], Image) for item in payload)
-		# 	if isinstance(payload[key], Image):
-		# 		logger.warning(f"will not serialize PIL image in key '{key}'")
-		# 		del payload[key]
-
-
-
-adapters = [ControlNetAdapter(), ADetailerAdapter(), DynamicPromptsAdapter()]
+adapters = [ControlNetAdapter(), ADetailerAdapter(), DynamicPromptsAdapter(), MultiDiffusionAdapter()]

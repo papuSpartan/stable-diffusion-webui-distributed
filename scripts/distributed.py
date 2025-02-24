@@ -195,7 +195,7 @@ class DistributedScript(scripts.Script):
         if not self.enabled(p):
             return
 
-        active_adapters = []
+        self.active_adapters = []
         if p.all_prompts is None:
             p.all_prompts = []
         if p.all_negative_prompts is None:
@@ -219,10 +219,11 @@ class DistributedScript(scripts.Script):
                 continue
 
             title = script.title()
+            # logger.debug(f"processing script '{title}'")
             found_adapter = False
             for adapter in adapters:
                 if adapter.title.lower() in title.lower():
-                    active_adapters.append(adapter)
+                    self.active_adapters.append(adapter)
                     cede = adapter.early(p, self.world, script)
                     if cede:
                         logger.debug(f"adapter for '{adapter.title}' cedes control back to wui")
@@ -232,7 +233,7 @@ class DistributedScript(scripts.Script):
 
             if not found_adapter: # shoehorn scripts which we don't explicitly support
                 generic_adapter.early(p, self.world, script)
-        logger.debug(f"activated {len(active_adapters)} adapters: {[a.title for a in active_adapters]}")
+        logger.debug(f"activated {len(self.active_adapters)} adapters: {[a.title for a in self.active_adapters]}")
 
         # generate seed early for master so that we can calculate the successive seeds for each slave
         fix_seed(p)
@@ -254,7 +255,7 @@ class DistributedScript(scripts.Script):
         }
 
         self.world.optimize_jobs(payload)
-        for adapter in active_adapters:
+        for adapter in self.active_adapters:
             adapter.late(p, self.world, payload, option_payload)
         generic_adapter.late(p, self.world, payload, option_payload)
 
@@ -351,6 +352,8 @@ class DistributedScript(scripts.Script):
             worker.response = None
         # restore process_images_inner if it was monkey-patched
         processing.process_images_inner = self.original_process_images_inner
+        for adapter in self.active_adapters:
+            adapter.cleanup()
         # save any dangling state to prevent load_config in next iteration overwriting it
         self.world.save_config()
 
