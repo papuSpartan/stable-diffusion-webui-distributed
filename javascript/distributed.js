@@ -3,21 +3,15 @@ function confirm_restart_workers(_) {
     return confirm('Restart remote workers?')
 }
 
-// live updates
+// live updates for extension status tab
 function update() {
     try {
-        let currentTab = get_uiCurrentTabContent()
-        let buttons = document.querySelectorAll('#distributed-refresh-status')
-        for(let i = 0; i < buttons.length; i++) {
-            if(currentTab.contains(buttons[i])) {
-                buttons[i].click()
-                break
-            }
-        }
+        get_uiCurrentTabContent().querySelectorAll('#distributed-refresh-status')[0].click()
     } catch (e) {
         if (!(e instanceof TypeError)) {
             throw e
         }
+        console.log('distributed ext: sdwui page not yet loaded... waiting')
     }
 }
 setInterval(update, 1500)
