@@ -3,3 +3,4 @@
 workers.json
 config.json
 distributed.log*
+distributed-config.json
