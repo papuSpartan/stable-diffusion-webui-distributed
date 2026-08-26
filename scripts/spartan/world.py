@@ -26,6 +26,11 @@ from torchvision.transforms import ToPILImage
 from modules.images import image_grid
 
 
+def _model_dump(model):
+    dump = getattr(model, "model_dump", None)
+    return dump() if dump is not None else model.dict()
+
+
 class NotBenchmarked(Exception):
     """
     Should be raised when attempting to do something that requires knowledge of worker benchmark statistics, and
@@ -187,7 +192,7 @@ class World:
 
     def sample_master(self) -> float:
         p = StableDiffusionProcessingTxt2Img()
-        d = sh.benchmark_payload.dict()
+        d = _model_dump(sh.benchmark_payload)
         for key in d:
             setattr(p, key, d[key])
         p.do_not_save_samples = True
@@ -693,7 +698,7 @@ class World:
 
             self.add_worker(**fields)
 
-        sh.benchmark_payload = Benchmark_Payload(**config.benchmark_payload.dict())
+        sh.benchmark_payload = Benchmark_Payload(**_model_dump(config.benchmark_payload))
         self.job_timeout = config.job_timeout
         self.enabled = config.enabled
         self.enabled_i2i = config.enabled_i2i
@@ -708,7 +713,7 @@ class World:
         """
 
         config = ConfigModel(
-            workers=[{worker.label: worker.model.dict()} for worker in self._workers],
+            workers=[{worker.label: _model_dump(worker.model)} for worker in self._workers],
             benchmark_payload=sh.benchmark_payload,
             job_timeout=self.job_timeout,
             enabled=self.enabled,
